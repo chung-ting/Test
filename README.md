@@ -1,4 +1,6 @@
-# FP&A toolkit
+# FP&A toolkit + 台股短期趨勢預測
+
+This repo holds two independent packages: `fpa/` (below) and `twpred/` (台股預測，見文末).
 
 Dependency-free Python (3.10+) tools for monthly financial planning & analysis:
 
@@ -36,3 +38,60 @@ CSV with columns `period,account,category,amount`:
 ```sh
 python3 -m unittest -v
 ```
+
+---
+
+# twpred：台股短期趨勢預測 MVP
+
+結合 **技術面、籌碼／風向、月營收**，用 LightGBM 預測「未來 5 天扣成本後報酬 > 2%」的機率，
+並用 walk-forward 回測，誠實地呈現「出手門檻越嚴 → 勝率越高 → 機會越少」這條曲線。
+
+## 安裝與執行
+
+```sh
+pip install -r requirements.txt
+export FINMIND_TOKEN=你的token      # 到 https://finmindtrade.com 免費註冊，可不設但請求上限較低
+
+# 回測（第一次會下載台灣 50 的資料並快取到 data/cache/，約 200 次 API 請求）
+python3 -m twpred backtest --start 2017-01-01 --end 2026-10-23
+
+# 今天收盤後的訊號：前 10 名
+python3 -m twpred signal --start 2021-01-01 --end 2026-10-23 --top 10
+```
+
+常用參數：`--stocks 2330,2317,2454`（自選股票）、`--horizon 5`（持有天數）、
+`--target 0.02`（標籤門檻）、`--fee-discount 0.28`（券商手續費折數）、
+`--top 3 --min-prob 0.5`（投資組合模擬的出手規則）。
+
+報告輸出在 `reports/report.md`，另有 `predictions.csv`（每筆樣本外預測）與 `equity_curve.csv`。
+
+## 報告怎麼看
+
+1. **門檻 vs. 勝率表**：先看第一列「全部（基準）」的勝率，模型挑出來的要明顯比它高才有用。
+   看 **95% 信賴區間的下限**，交易次數少時高勝率可能只是運氣。
+2. **AUC**：0.5 是瞎猜；短線股價能穩定在 0.53～0.58 就算有東西。
+3. **逐年表現**：每一年都要比基準好，只有某一年好多半是運氣。
+4. **投資組合**：看扣成本後的報酬、最大回撤，並和加權指數比。
+
+## 防止回測作弊的設計
+
+| 問題 | 處理方式 |
+|---|---|
+| 用到未來資料 | 所有特徵只用 t 日收盤前已公開的資訊；月營收視為次月 11 日才可用 |
+| 標籤重疊 | walk-forward 訓練集剔除最後 horizon 天（purge） |
+| 進場價不實 | t+1 **開盤**進場；隔天一字漲停視為買不到 |
+| 忽略成本 | 手續費 0.1425%×2 + 證交稅 0.3% 全部扣除 |
+| 參數過度擬合 | LightGBM 參數固定，不對回測結果調參 |
+| 門檻偷看 | 只用事前可知的門檻（每日前 K 名、固定機率） |
+
+測試（`python3 -m unittest`）用合成資料驗證：純雜訊資料 AUC 必須約 0.5，
+截斷未來資料後特徵不能改變，埋入的已知訊號要能被找出來。
+
+## 已知限制 / 下一步
+
+- 股票池是「現在」的台灣 50，有倖存者偏差 → 改用歷史成分股或全市場
+- 未含隔夜美股、費半、台積電 ADR、台指期外資未平倉 → 第 3 階段
+- 未含新聞、PTT 情緒 → 第 4 階段
+- 若 FinMind 帳號不支援 `TaiwanStockPriceAdj`，會退回未還原價，除權息日會有假跌幅
+
+本工具僅供研究，不構成投資建議。
