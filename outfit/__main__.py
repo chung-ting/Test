@@ -11,6 +11,7 @@ from pathlib import Path
 import anthropic
 
 from .analyze import OCCASIONS, analyze
+from .body import measure
 from .claude import AnalysisError
 from .sizing import MEASURES, extract_chart, recommend
 
@@ -64,7 +65,11 @@ class Handler(BaseHTTPRequestHandler):
     def _recommend_size(self, body: dict) -> dict:
         return recommend(body.get("chart") or {}, body.get("reference") or {})
 
-    ROUTES = {"/api/analyze": _analyze, "/api/size-chart": _size_chart, "/api/recommend-size": _recommend_size}
+    def _body_measure(self, body: dict) -> dict:
+        return measure(body.get("front"), body.get("side"), body.get("height_cm"), body.get("calibration"))
+
+    ROUTES = {"/api/analyze": _analyze, "/api/size-chart": _size_chart, "/api/recommend-size": _recommend_size,
+              "/api/body-measure": _body_measure}
 
     def do_POST(self):
         route = self.ROUTES.get(self.path)
