@@ -31,6 +31,8 @@ def _request(dataset: str, data_id: str, start: str, end: str, token: str | None
             if attempt == 3:
                 raise
             time.sleep(2 ** (attempt + 1))
+    if payload.get("status") == 402:
+        raise RuntimeError("FinMind 已達每小時請求上限；已下載的部分有快取，等一小時後重跑即可接續（設 FINMIND_TOKEN 可提高上限）")
     if payload.get("status") != 200:
         raise RuntimeError(f"FinMind {dataset} {data_id}: {payload.get('msg')}")
     return pd.DataFrame(payload["data"])
@@ -46,17 +48,32 @@ def fetch(dataset: str, data_id: str, start: str, end: str, refresh: bool = Fals
     return df
 
 
+def adjust_for_dividends(px: pd.DataFrame, div: pd.DataFrame) -> pd.DataFrame:
+    """向後還原權息：除權息日之前的價格乘上 after_price / before_price。
+
+    免費帳號拿不到 TaiwanStockPriceAdj，不還原的話除息日會出現假跌幅
+    （高殖利率股一年可達 5% 以上），污染標籤與技術指標。
+    """
+    px = px.sort_values("date").reset_index(drop=True)
+    if div.empty:
+        return px
+    div = div[(div["before_price"] > 0) & (div["after_price"] > 0)]
+    factor = pd.Series(1.0, index=px.index)
+    dates = pd.to_datetime(px["date"])
+    for ex_date, ratio in zip(pd.to_datetime(div["date"]), div["after_price"] / div["before_price"]):
+        factor[dates < ex_date] *= ratio
+    for col in ("open", "high", "low", "close"):
+        px[col] = px[col] * factor
+    return px
+
+
 def _prices(stock_id: str, start: str, end: str, refresh: bool) -> pd.DataFrame:
-    # 優先用還原權息價；若帳號等級不支援則退回原始價（除權息日會出現假跌幅）。
-    try:
-        df = fetch("TaiwanStockPriceAdj", stock_id, start, end, refresh)
-    except RuntimeError:
-        df = pd.DataFrame()
-    if df.empty:
-        df = fetch("TaiwanStockPrice", stock_id, start, end, refresh)
-    return df.rename(columns={"max": "high", "min": "low", "Trading_Volume": "volume"})[
+    df = fetch("TaiwanStockPrice", stock_id, start, end, refresh)
+    df = df.rename(columns={"max": "high", "min": "low", "Trading_Volume": "volume"})[
         ["date", "stock_id", "open", "high", "low", "close", "volume"]
     ]
+    div = fetch("TaiwanStockDividendResult", stock_id, start, end, refresh)
+    return adjust_for_dividends(df, div)
 
 
 def _institutional(stock_id: str, start: str, end: str, refresh: bool) -> pd.DataFrame:
