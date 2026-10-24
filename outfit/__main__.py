@@ -1,4 +1,4 @@
-"""Serve the outfit analysis web app: python3 -m outfit [--host 0.0.0.0] [--port 8000]"""
+"""Serve the outfit analysis and size recommendation web app: python3 -m outfit [--host 0.0.0.0] [--port 8000]"""
 
 import argparse
 import base64
@@ -10,7 +10,9 @@ from pathlib import Path
 
 import anthropic
 
-from .analyze import OCCASIONS, AnalysisError, analyze
+from .analyze import OCCASIONS, analyze
+from .claude import AnalysisError
+from .sizing import MEASURES, extract_chart, recommend
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 15 * 1024 * 1024
@@ -30,6 +32,7 @@ def decode_data_url(data_url: str) -> tuple[bytes, str]:
 
 class Handler(BaseHTTPRequestHandler):
     analyzer = staticmethod(analyze)
+    chart_reader = staticmethod(extract_chart)
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -46,20 +49,34 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/occasions":
             self._json(200, OCCASIONS)
+        elif self.path == "/api/measures":
+            self._json(200, {cat: {k: {"label": m.label, "hint": m.hint} for k, m in ms.items()} for cat, ms in MEASURES.items()})
         else:
             self._json(404, {"error": "找不到頁面"})
 
+    def _analyze(self, body: dict) -> dict:
+        image, media_type = decode_data_url(body.get("image", ""))
+        return self.analyzer(image, media_type, body.get("occasion", "daily"), body.get("note", ""))
+
+    def _size_chart(self, body: dict) -> dict:
+        return self.chart_reader(*decode_data_url(body.get("image", "")))
+
+    def _recommend_size(self, body: dict) -> dict:
+        return recommend(body.get("chart") or {}, body.get("reference") or {})
+
+    ROUTES = {"/api/analyze": _analyze, "/api/size-chart": _size_chart, "/api/recommend-size": _recommend_size}
+
     def do_POST(self):
-        if self.path != "/api/analyze":
+        route = self.ROUTES.get(self.path)
+        if route is None:
             return self._json(404, {"error": "找不到頁面"})
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_BODY:
             return self._json(413, {"error": "照片太大，請換一張小一點的"})
         try:
             body = json.loads(self.rfile.read(length))
-            image, media_type = decode_data_url(body.get("image", ""))
-            result = self.analyzer(image, media_type, body.get("occasion", "daily"), body.get("note", ""))
-        except (json.JSONDecodeError, AttributeError):
+            result = route(self, body)
+        except (json.JSONDecodeError, AttributeError, TypeError):
             return self._json(400, {"error": "請求格式錯誤"})
         except AnalysisError as e:
             return self._json(400, {"error": str(e)})

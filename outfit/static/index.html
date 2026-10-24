@@ -53,11 +53,41 @@
   .look td:first-child { color: var(--muted); white-space: nowrap; width: 4.5em; }
   .why { color: var(--muted); font-size: .95rem; margin: 0; }
   .privacy { color: var(--muted); font-size: .85rem; text-align: center; }
+  .tabs { display: flex; gap: 4px; margin: 12px 0 16px; border-bottom: 1px solid var(--border); }
+  .tabs button { border: 0; border-radius: 0; background: none; padding: 10px 14px; color: var(--muted);
+                 border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .hint { color: var(--muted); font-size: .9rem; margin: -4px 0 12px; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .fields label { display: flex; flex-direction: column; font-weight: 600; font-size: .95rem; }
+  .fields small { color: var(--muted); font-weight: 400; font-size: .8rem; }
+  input[type=number] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+                       border-radius: 10px; padding: 8px 10px; width: 100%; margin-top: 4px; }
+  .preview { display: none; width: 100%; max-height: 320px; object-fit: contain; border-radius: 12px; margin-top: 12px; }
+  .big-size { font-size: 3rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
+  .warn { color: var(--warn); }
+  .size-row { border-top: 1px solid var(--border); padding: 10px 0; }
+  .size-row.best { background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 10px 8px; }
+  .size-row h3 { margin: 0 0 4px; font-size: 1rem; }
+  .verdicts { display: flex; flex-wrap: wrap; gap: 6px; font-size: .85rem; }
+  .verdict { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+  .verdict.ok { color: var(--good); border-color: var(--good); }
+  .verdict.off { color: var(--warn); border-color: var(--warn); }
+  .chart-scroll { overflow-x: auto; }
+  .chart-table { border-collapse: collapse; font-size: .9rem; }
+  .chart-table th, .chart-table td { padding: 4px; text-align: center; white-space: nowrap; }
+  .chart-table input { width: 4.5em; margin: 0; padding: 4px 6px; }
 </style>
 </head>
 <body>
 <main>
   <h1>穿搭分析</h1>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="analyze" aria-selected="true">👗 穿搭建議</button>
+    <button role="tab" data-tab="size" aria-selected="false">📏 尺寸推薦</button>
+  </nav>
+
+  <div id="tab-analyze">
   <p class="sub">拍一張全身照，AI 幫你分析目前的穿搭，並給出適合你的建議。</p>
 
   <section class="card">
@@ -78,6 +108,31 @@
 
   <div id="status"></div>
   <div id="result"></div>
+  </div>
+
+  <div id="tab-size" hidden>
+  <p class="sub">拿一件你穿起來最合身的衣服來比對商品尺寸表，算出該買哪一號。</p>
+
+  <section class="card">
+    <h2>1. 量一件你最合身的衣服</h2>
+    <p class="hint">衣服平放在桌上，用軟尺量，單位公分。不用每項都填，但胸寬或腰寬最重要。</p>
+    <div class="row" id="categories">
+      <button class="chip" data-cat="top" aria-pressed="true">上衣</button>
+      <button class="chip" data-cat="bottom" aria-pressed="false">褲子／裙子</button>
+    </div>
+    <div id="ref-fields" class="fields"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. 上傳商品的尺寸表截圖</h2>
+    <label class="btn">🖼️ 選擇截圖<input id="chart-file" type="file" accept="image/*"></label>
+    <img id="chart-preview" class="preview" alt="尺寸表預覽">
+    <button class="btn-primary" id="chart-submit" disabled>讀取尺寸表並推薦</button>
+  </section>
+
+  <div id="size-status"></div>
+  <div id="size-result"></div>
+  </div>
 
   <p class="privacy">照片會傳送到 Anthropic 的 Claude 進行分析，本站不會儲存。</p>
 </main>
@@ -174,6 +229,134 @@ function swatches(colors) {
   const safe = (hex) => /^#[0-9a-fA-F]{3,8}$/.test(hex) ? hex : "transparent";
   return el("div", { class: "swatches" },
     ...colors.map((c) => el("div", { class: "swatch" }, el("span", { style: `background:${safe(c.hex)}` }), c.name)));
+}
+
+// ---------- tabs ----------
+document.querySelectorAll("[role=tab]").forEach((tab) => {
+  tab.onclick = () => {
+    document.querySelectorAll("[role=tab]").forEach((t) => {
+      t.setAttribute("aria-selected", String(t === tab));
+      $("tab-" + t.dataset.tab).hidden = t !== tab;
+    });
+  };
+});
+
+// ---------- size recommendation ----------
+const store = {
+  get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} },
+};
+let measures = {};
+let category = "top";
+let reference = store.get("outfit.reference") || { top: {}, bottom: {} };
+let chartImage = null;
+let chart = null;
+
+async function postJSON(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "發生錯誤，請再試一次");
+  return data;
+}
+function sizeError(msg) { $("size-status").replaceChildren(el("div", { class: "card error" }, msg)); }
+
+function renderRefFields() {
+  document.querySelectorAll("#categories .chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.cat === category)));
+  const fields = Object.entries(measures[category] || {}).map(([key, m]) => {
+    const input = el("input", { type: "number", inputmode: "decimal", step: "0.5", min: "1", placeholder: "cm" });
+    input.value = reference[category][key] ?? "";
+    input.oninput = () => {
+      const v = parseFloat(input.value);
+      if (Number.isFinite(v) && v > 0) reference[category][key] = v; else delete reference[category][key];
+      store.set("outfit.reference", reference);
+      if (chart && chart.category === category) recompute();
+    };
+    return el("label", {}, m.label, el("small", {}, m.hint), input);
+  });
+  $("ref-fields").replaceChildren(...fields);
+}
+document.querySelectorAll("#categories .chip").forEach((c) => {
+  c.onclick = () => { category = c.dataset.cat; renderRefFields(); };
+});
+fetch("/api/measures").then((r) => r.json()).then((m) => { measures = m; renderRefFields(); });
+
+$("chart-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    chartImage = await resize(file);
+    $("chart-preview").src = chartImage;
+    $("chart-preview").style.display = "block";
+    $("chart-submit").disabled = false;
+  } catch (err) { sizeError(err.message); }
+};
+
+$("chart-submit").onclick = async () => {
+  $("chart-submit").disabled = true;
+  $("size-result").replaceChildren();
+  $("size-status").replaceChildren(el("div", { class: "card loading" }, el("div", { class: "spinner" }), "讀取尺寸表中…"));
+  try {
+    chart = await postJSON("/api/size-chart", { image: chartImage });
+    if (chart.category !== category) { category = chart.category; renderRefFields(); }
+    $("size-status").replaceChildren();
+    await recompute();
+    $("size-result").scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    sizeError(err.message);
+  } finally {
+    $("chart-submit").disabled = false;
+  }
+};
+
+let recomputeSeq = 0;
+async function recompute() {
+  const seq = ++recomputeSeq;
+  let rec = null, error = null;
+  try {
+    rec = await postJSON("/api/recommend-size", { chart, reference: reference[chart.category] });
+  } catch (err) { error = err.message; }
+  if (seq === recomputeSeq) renderSize(rec, error);
+}
+
+function renderSize(rec, error) {
+  const labels = measures[chart.category];
+  const out = [];
+  if (error) {
+    out.push(el("div", { class: "card error" }, error));
+  } else {
+    out.push(el("section", { class: "card" },
+      el("h2", {}, "推薦尺寸"),
+      el("div", { class: "big-size" }, rec.recommended),
+      ...rec.warnings.map((w) => el("p", { class: "warn" }, "⚠️ " + w)),
+      chart.notes ? el("p", { class: "hint" }, "尺寸表備註：" + chart.notes) : "",
+      chart.stretch ? el("p", { class: "hint" }, "彈性布料：偏緊一點也可以接受，已放寬計算。") : "",
+      ...rec.sizes.map((s) => el("div", { class: "size-row" + (s.size === rec.recommended ? " best" : "") },
+        el("h3", {}, s.size),
+        el("div", { class: "verdicts" }, ...s.fits.map((f) => el("span", { class: "verdict " + (f.verdict === "剛好" ? "ok" : "off") },
+          `${f.label} ${f.verdict}（${f.diff > 0 ? "+" : ""}${f.diff}）`))),
+      )),
+    ));
+  }
+  // The table Claude read, editable so misread numbers can be fixed.
+  const keys = Object.keys(labels).filter((k) => chart.sizes.some((s) => s[k] != null));
+  const rows = chart.sizes.map((s) => el("tr", {}, el("th", {}, s.size), ...keys.map((k) => {
+    const input = el("input", { type: "number", inputmode: "decimal", step: "0.5" });
+    input.value = s[k] ?? "";
+    input.onchange = () => {
+      const v = parseFloat(input.value);
+      if (Number.isFinite(v) && v > 0) s[k] = v; else delete s[k];
+      recompute();
+    };
+    return el("td", {}, input);
+  })));
+  out.push(el("section", { class: "card" },
+    el("h2", {}, "讀到的尺寸表（平量，公分）"),
+    el("p", { class: "hint" }, "請對照截圖檢查，數字讀錯可以直接修改，結果會自動更新。圍度已換算成平量寬度。"),
+    el("div", { class: "chart-scroll" }, el("table", { class: "chart-table" },
+      el("tr", {}, el("th", {}, "尺寸"), ...keys.map((k) => el("th", {}, labels[k].label))), ...rows)),
+  ));
+  $("size-result").replaceChildren(...out);
 }
 
 function render(d) {
