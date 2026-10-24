@@ -95,3 +95,21 @@ python3 -m twpred signal --start 2021-01-01 --end 2026-10-23 --top 10
 - 若 FinMind 帳號不支援 `TaiwanStockPriceAdj`，會退回未還原價，除權息日會有假跌幅
 
 本工具僅供研究，不構成投資建議。
+
+---
+
+# outfit — 穿搭分析網頁
+
+拍一張全身照，選擇場合（日常、上班、約會…），由 Claude 分析目前穿搭（評分、優點、可改進處）、
+適合的剪裁與顏色（附色票），並提出 3 套完整穿搭建議。資料來源就是使用者拍的照片，不需要外部資料庫。
+
+```sh
+pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...      # 從 https://console.anthropic.com 取得
+python3 -m outfit                        # 開 http://127.0.0.1:8000
+python3 -m outfit --host 0.0.0.0         # 讓同一個 Wi-Fi 的手機用 http://<電腦IP>:8000 開啟
+```
+
+- 照片在瀏覽器先縮到最長邊 1568px 再上傳，伺服器不儲存照片。
+- 每次分析約 NT$0.5–1（Claude API 計費）。
+- 拒答時會自動改由其他模型回答（server-side fallback）。

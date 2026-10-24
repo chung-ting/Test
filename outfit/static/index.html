@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>穿搭分析</title>
+<style>
+  :root {
+    --bg: #faf7f4; --card: #ffffff; --text: #2b2724; --muted: #7a716a;
+    --accent: #b5543c; --accent-text: #ffffff; --border: #e8e1da; --good: #3d7a52; --warn: #b07a1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1a19; --card: #262321; --text: #f0ebe6; --muted: #a59d96;
+      --accent: #e07a5f; --accent-text: #1c1a19; --border: #3a3633; --good: #7cc495; --warn: #e0b45f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.6 -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, .btn { font: inherit; border: 1px solid var(--border); background: var(--card); color: var(--text);
+                 border-radius: 999px; padding: 10px 16px; cursor: pointer; }
+  .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); width: 100%;
+                 font-weight: 600; padding: 14px; margin-top: 12px; }
+  .btn-primary:disabled { opacity: .5; cursor: default; }
+  .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  input[type=file] { display: none; }
+  #preview { display: none; width: 100%; max-height: 420px; object-fit: contain; border-radius: 12px; margin-top: 12px; background: var(--bg); }
+  textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+             border-radius: 12px; padding: 10px; margin-top: 12px; resize: vertical; }
+  .error { color: var(--accent); }
+  .loading { text-align: center; color: var(--muted); }
+  .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent);
+             border-radius: 50%; margin: 0 auto 8px; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .score { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+  .score b { font-size: 2.4rem; color: var(--accent); line-height: 1; }
+  ul { margin: 4px 0 12px; padding-left: 1.2em; }
+  .label-good { color: var(--good); font-weight: 600; }
+  .label-warn { color: var(--warn); font-weight: 600; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 12px; }
+  .swatch { display: flex; flex-direction: column; align-items: center; width: 64px; font-size: .8rem; text-align: center; }
+  .swatch span { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); margin-bottom: 4px; }
+  .look h3 { margin: 0 0 8px; font-size: 1rem; }
+  .look table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .look td { padding: 6px 4px; border-top: 1px solid var(--border); vertical-align: top; }
+  .look td:first-child { color: var(--muted); white-space: nowrap; width: 4.5em; }
+  .why { color: var(--muted); font-size: .95rem; margin: 0; }
+  .privacy { color: var(--muted); font-size: .85rem; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>穿搭分析</h1>
+  <p class="sub">拍一張全身照，AI 幫你分析目前的穿搭，並給出適合你的建議。</p>
+
+  <section class="card">
+    <h2>1. 拍照或選照片</h2>
+    <div class="row">
+      <label class="btn">📷 拍照<input id="camera" type="file" accept="image/*" capture="environment"></label>
+      <label class="btn">🖼️ 從相簿選<input id="gallery" type="file" accept="image/*"></label>
+    </div>
+    <img id="preview" alt="照片預覽">
+  </section>
+
+  <section class="card">
+    <h2>2. 要穿去哪裡？</h2>
+    <div class="row" id="occasions"></div>
+    <textarea id="note" rows="2" maxlength="200" placeholder="（選填）例如：想看起來高一點、不喜歡太亮的顏色"></textarea>
+    <button class="btn-primary" id="submit" disabled>開始分析</button>
+  </section>
+
+  <div id="status"></div>
+  <div id="result"></div>
+
+  <p class="privacy">照片會傳送到 Anthropic 的 Claude 進行分析，本站不會儲存。</p>
+</main>
+
+<script>
+const MAX_SIDE = 1568;  // Claude downsizes larger images anyway; resizing first saves upload time
+let imageData = null;
+let occasion = "daily";
+
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "style") node.style.cssText = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+fetch("/api/occasions").then((r) => r.json()).then((occasions) => {
+  for (const [key, label] of Object.entries(occasions)) {
+    const chip = el("button", { class: "chip", "aria-pressed": String(key === occasion) }, label);
+    chip.onclick = () => {
+      occasion = key;
+      document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+    };
+    $("occasions").append(chip);
+  }
+});
+
+function resize(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+      const canvas = el("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(img.src);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => reject(new Error("無法讀取這張照片"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function onPick(e) {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    imageData = await resize(file);
+    $("preview").src = imageData;
+    $("preview").style.display = "block";
+    $("submit").disabled = false;
+    $("result").replaceChildren();
+    $("status").replaceChildren();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+$("camera").onchange = onPick;
+$("gallery").onchange = onPick;
+
+function showError(msg) {
+  $("status").replaceChildren(el("div", { class: "card error" }, msg));
+}
+
+$("submit").onclick = async () => {
+  $("submit").disabled = true;
+  $("result").replaceChildren();
+  $("status").replaceChildren(el("div", { class: "card loading" }, el("div", { class: "spinner" }), "分析中，大約需要 20–40 秒…"));
+  try {
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: imageData, occasion, note: $("note").value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "分析失敗，請再試一次");
+    $("status").replaceChildren();
+    render(data);
+    $("result").scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    showError(err.message === "Failed to fetch" ? "連不上伺服器，請確認網路" : err.message);
+  } finally {
+    $("submit").disabled = false;
+  }
+};
+
+function list(items) { return el("ul", {}, ...items.map((t) => el("li", {}, t))); }
+function swatches(colors) {
+  const safe = (hex) => /^#[0-9a-fA-F]{3,8}$/.test(hex) ? hex : "transparent";
+  return el("div", { class: "swatches" },
+    ...colors.map((c) => el("div", { class: "swatch" }, el("span", { style: `background:${safe(c.hex)}` }), c.name)));
+}
+
+function render(d) {
+  const out = $("result");
+  if (!d.is_person) {
+    out.append(el("div", { class: "card" }, el("h2", {}, "需要換一張照片"), d.summary));
+    return;
+  }
+  const c = d.current_outfit;
+  out.append(el("section", { class: "card" },
+    el("h2", {}, "目前穿搭"),
+    el("div", { class: "score" }, el("b", {}, String(c.score)), "/ 10"),
+    el("p", {}, d.summary),
+    el("p", {}, c.description),
+    el("div", { class: "label-good" }, "👍 做得好的地方"), list(c.strengths),
+    el("div", { class: "label-warn" }, "✨ 可以更好"), list(c.improvements),
+  ));
+  const b = d.body_and_color;
+  out.append(el("section", { class: "card" },
+    el("h2", {}, "適合你的剪裁與顏色"),
+    el("p", {}, b.body_notes),
+    el("div", { class: "label-good" }, "推薦色"), swatches(b.flattering_colors),
+    el("div", { class: "label-warn" }, "建議少用"), swatches(b.colors_to_avoid),
+  ));
+  d.suggestions.forEach((s, i) => {
+    out.append(el("section", { class: "card look" },
+      el("h3", {}, `穿搭建議 ${i + 1}：${s.title}`),
+      el("table", {}, ...s.items.map((it) => el("tr", {}, el("td", {}, it.category), el("td", {}, `${it.item}（${it.color}）`)))),
+      el("p", { class: "why" }, s.why),
+    ));
+  });
+}
+</script>
+</body>
+</html>
