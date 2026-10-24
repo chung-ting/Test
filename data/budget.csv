@@ -1,0 +1,22 @@
+period,account,category,amount
+2026-07,Subscription Revenue,revenue,400000
+2026-07,Services Revenue,revenue,60000
+2026-07,Hosting,cogs,70000
+2026-07,Support Staff,cogs,35000
+2026-07,R&D Payroll,opex,180000
+2026-07,Sales & Marketing,opex,150000
+2026-07,G&A,opex,60000
+2026-08,Subscription Revenue,revenue,416000
+2026-08,Services Revenue,revenue,60600
+2026-08,Hosting,cogs,72100
+2026-08,Support Staff,cogs,35000
+2026-08,R&D Payroll,opex,181800
+2026-08,Sales & Marketing,opex,153000
+2026-08,G&A,opex,60000
+2026-09,Subscription Revenue,revenue,432640
+2026-09,Services Revenue,revenue,61206
+2026-09,Hosting,cogs,74263
+2026-09,Support Staff,cogs,35000
+2026-09,R&D Payroll,opex,183618
+2026-09,Sales & Marketing,opex,156060
+2026-09,G&A,opex,60000
