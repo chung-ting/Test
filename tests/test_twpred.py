@@ -7,6 +7,7 @@ import pandas as pd
 
 from twpred import backtest
 from twpred.config import Config
+from twpred.data import adjust_for_dividends
 from twpred.features import FEATURES, add_labels, build_dataset, revenue_features
 from twpred.model import walk_forward
 
@@ -105,6 +106,16 @@ class LabelTests(unittest.TestCase):
         self.assertAlmostEqual(out.loc[1, "fwd_ret"], 100 / 100 - 1)
         self.assertAlmostEqual(out.loc[0, "net_ret"], 120 / 110 - 1 - Config().round_trip_cost)
         self.assertTrue(np.isnan(out.loc[2, "label"]))  # 未來不足 5 天
+
+    def test_dividend_adjustment_removes_fake_drop(self):
+        px = pd.DataFrame({"date": ["2024-06-27", "2024-06-28", "2024-07-01"], "stock_id": "2882",
+                           "open": [58.9, 59.1, 57.9], "high": [59.0, 59.2, 58.3],
+                           "low": [58.8, 58.9, 57.5], "close": [59.1, 59.0, 58.1], "volume": [1, 1, 1]})
+        div = pd.DataFrame({"date": ["2024-07-01"], "before_price": [59.0], "after_price": [57.0]})
+        adj = adjust_for_dividends(px, div)
+        self.assertAlmostEqual(adj.loc[1, "close"], 57.0)  # 除息前一天收盤 = 參考價
+        self.assertAlmostEqual(adj.loc[2, "close"], 58.1)  # 除息日當天不動
+        self.assertGreater(adj.loc[2, "close"] / adj.loc[1, "close"] - 1, 0)  # 原始 -1.5%，還原後是真實漲幅
 
     def test_wilson_interval(self):
         lo, hi = backtest.wilson(8, 10)
