@@ -50,6 +50,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+        elif self.path.startswith("/static/") and self.path.endswith(".js"):
+            file = STATIC / self.path.removeprefix("/static/")
+            if file.parent != STATIC or not file.is_file():
+                return self._json(404, {"error": "找不到頁面"})
+            self._send(200, file.read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/api/occasions":
             self._json(200, OCCASIONS)
         elif self.path == "/api/measures":
@@ -73,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
     def _try_on(self, body: dict) -> dict:
         person, media_type = decode_data_url(body.get("image", ""))
         garments = [decode_data_url(g) for g in body.get("garments") or []]
-        result = self.dresser(person, media_type, garments, body.get("description", ""))
+        result = self.dresser(person, media_type, garments, body.get("description", ""), body.get("aspect"))
         image = base64.b64encode(result["image"]).decode()
         return {"image": f"data:{result['media_type']};base64,{image}", "note": result["note"]}
 

@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 from outfit import AnalysisError
-from outfit.tryon import MODEL, build_contents, try_on
+from outfit.tryon import MODEL, build_contents, nearest_aspect_ratio, try_on
 
 PERSON = b"\xff\xd8person-jpeg"
 SHIRT = b"\x89PNGshirt"
@@ -70,6 +70,14 @@ class TryOnTests(unittest.TestCase):
         self.assertEqual([base64.urlsafe_b64decode(p["inlineData"]["data"] + "==") for p in parts[1:]], [PERSON, SHIRT])
         self.assertEqual(body["generationConfig"]["responseModalities"], ["TEXT", "IMAGE"])
 
+    def test_keeps_the_photo_aspect_ratio(self):
+        try_on(PERSON, "image/jpeg", [], "紅色洋裝", aspect=3024 / 4032, client=self.client)
+        self.assertEqual(FakeGemini.requests[0][1]["generationConfig"]["imageConfig"], {"aspectRatio": "3:4"})
+        self.assertEqual(nearest_aspect_ratio(1080 / 1920), "9:16")
+        self.assertEqual(nearest_aspect_ratio(1.0), "1:1")
+        try_on(PERSON, "image/jpeg", [], "紅色洋裝", aspect="tall", client=self.client)
+        self.assertNotIn("imageConfig", FakeGemini.requests[1][1]["generationConfig"])
+
     def test_no_image_in_reply_is_explained(self):
         FakeGemini.reply = {"candidates": [{"content": {"role": "model", "parts": [{"text": "I can't do that."}]},
                                             "finishReason": "STOP"}]}
@@ -104,8 +112,8 @@ class TryOnRouteTests(unittest.TestCase):
 
         calls = []
 
-        def fake(person, media_type, garments, description):
-            calls.append((person, media_type, garments, description))
+        def fake(person, media_type, garments, description, aspect):
+            calls.append((person, media_type, garments, description, aspect))
             return {"image": RESULT, "media_type": "image/png", "note": ""}
 
         handler = type("H", (Handler,), {"dresser": staticmethod(fake), "log_message": lambda *a: None})
@@ -113,7 +121,8 @@ class TryOnRouteTests(unittest.TestCase):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             url = lambda data, mt: f"data:{mt};base64," + base64.b64encode(data).decode()
-            body = {"image": url(PERSON, "image/jpeg"), "garments": [url(SHIRT, "image/png")], "description": "襯衫"}
+            body = {"image": url(PERSON, "image/jpeg"), "garments": [url(SHIRT, "image/png")], "description": "襯衫",
+                    "aspect": 0.75}
             req = urllib.request.Request(f"http://127.0.0.1:{server.server_address[1]}/api/try-on",
                                          data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req) as r:
@@ -121,7 +130,7 @@ class TryOnRouteTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
-        self.assertEqual(calls, [(PERSON, "image/jpeg", [(SHIRT, "image/png")], "襯衫")])
+        self.assertEqual(calls, [(PERSON, "image/jpeg", [(SHIRT, "image/png")], "襯衫", 0.75)])
         self.assertEqual(reply["image"], url(RESULT, "image/png"))
 
 

@@ -5,6 +5,7 @@ garment's real size. Use the size recommendation for that.
 """
 
 import logging
+import math
 import os
 
 from google import genai
@@ -14,12 +15,15 @@ from .claude import MEDIA_TYPES, AnalysisError
 
 MODEL = os.environ.get("OUTFIT_TRYON_MODEL", "gemini-3.1-flash-image")
 MAX_GARMENTS = 3
+# Aspect ratios the Gemini image models accept for their output.
+ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
 log = logging.getLogger("outfit")
 
 PROMPT = """Edit the first image, a photo of a real person, so that they are wearing the outfit described below.
 
 Keep everything except the clothes exactly as in the original photo: the person's face and identity, hair,
-skin tone, body shape and proportions, pose, hands, background, lighting and camera angle.
+skin tone, body shape and proportions, pose, hands, background, lighting, framing and camera angle.
+The face must stay pixel-for-pixel the same person: do not redraw, beautify, age, or restyle it.
 Replace only the clothing (and shoes or accessories if the outfit names them). Make the fabric, folds,
 shadows and fit look like a real photograph. Do not make the person slimmer, taller or otherwise different.
 Return one edited photo."""
@@ -47,6 +51,14 @@ def build_contents(person: bytes, media_type: str, garments: list[tuple[bytes, s
     ]
 
 
+def nearest_aspect_ratio(aspect: float) -> str:
+    """The supported output ratio closest to width / height, so the edit keeps the photo's framing."""
+    def value(ratio: str) -> float:
+        w, h = ratio.split(":")
+        return int(w) / int(h)
+    return min(ASPECT_RATIOS, key=lambda r: abs(math.log(value(r) / aspect)))
+
+
 def parse_response(response) -> dict:
     feedback = getattr(response, "prompt_feedback", None)
     if feedback is not None and getattr(feedback, "block_reason", None):
@@ -64,8 +76,11 @@ def parse_response(response) -> dict:
 
 
 def try_on(person: bytes, media_type: str, garments: list[tuple[bytes, str]], description: str,
-           client=None) -> dict:
+           aspect: float | None = None, client=None) -> dict:
     contents = build_contents(person, media_type, garments, description)
+    image_config = None
+    if isinstance(aspect, (int, float)) and not isinstance(aspect, bool) and 0.2 < aspect < 5:
+        image_config = types.ImageConfig(aspect_ratio=nearest_aspect_ratio(aspect))
     try:
         client = client or genai.Client()
     except ValueError:
@@ -73,7 +88,7 @@ def try_on(person: bytes, media_type: str, garments: list[tuple[bytes, str]], de
     try:
         response = client.models.generate_content(
             model=MODEL, contents=contents,
-            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"], image_config=image_config),
         )
     except errors.APIError as e:
         log.exception("Gemini try-on call failed")

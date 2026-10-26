@@ -16,6 +16,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 16px/1.6 -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
   main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
@@ -227,6 +228,7 @@
 
 </main>
 
+<script src="/static/keepface.js"></script>
 <script>
 const MAX_SIDE = 1568;  // Claude downsizes larger images anyway; resizing first saves upload time
 let imageData = null;
@@ -680,6 +682,7 @@ function render(d) {
 // ---------- try-on ----------
 const MAX_GARMENTS = 3;
 let tryonPerson = null;
+let tryonAspect = null;
 let tryonGarments = [];
 
 function tryOnButton(suggestion) {
@@ -694,6 +697,9 @@ function tryOnButton(suggestion) {
 }
 function setTryonPerson(dataUrl) {
   tryonPerson = dataUrl;
+  const probe = new Image();
+  probe.onload = () => { tryonAspect = probe.naturalWidth / probe.naturalHeight; };
+  probe.src = dataUrl;
   $("tryon-person").src = dataUrl;
   $("tryon-person").style.display = "block";
   updateTryonSubmit();
@@ -728,6 +734,32 @@ $("tryon-garments").onchange = async (e) => {
 };
 $("tryon-clear-garments").onclick = () => { tryonGarments = []; renderGarments(); };
 $("tryon-desc").oninput = updateTryonSubmit;
+// Swap in a version with the original face and hair, with buttons to compare against the raw AI image.
+async function keepFace(original, edited, img, note, toggle) {
+  let kept;
+  try {
+    kept = await KeepFace.keepOriginalHead(original, edited);
+  } catch {
+    kept = { reason: "臉部偵測載入失敗，顯示的是 AI 原圖。" };
+  }
+  if (!kept.image) {
+    note.textContent = kept.reason;
+    return;
+  }
+  img.src = kept.image;
+  note.textContent = "已把你原本的臉和頭髮貼回去。";
+  const versions = { "保留原本的臉": kept.image, "AI 原圖": edited };
+  const buttons = Object.entries(versions).map(([label, src], i) => {
+    const b = el("button", { class: "chip", "aria-pressed": String(i === 0) }, label);
+    b.onclick = () => {
+      img.src = src;
+      buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    };
+    return b;
+  });
+  toggle.replaceChildren(...buttons);
+  toggle.hidden = false;
+}
 function tryonError(msg) { $("tryon-status").replaceChildren(el("div", { class: "card error" }, msg)); }
 
 $("tryon-submit").onclick = async () => {
@@ -735,16 +767,23 @@ $("tryon-submit").onclick = async () => {
   $("tryon-result").replaceChildren();
   $("tryon-status").replaceChildren(el("div", { class: "card loading" }, el("div", { class: "spinner" }), "產生試穿照中，大約需要 20–60 秒…"));
   try {
-    const data = await postJSON("/api/try-on", { image: tryonPerson, garments: tryonGarments, description: $("tryon-desc").value });
+    const original = tryonPerson;
+    const data = await postJSON("/api/try-on", { image: original, garments: tryonGarments,
+                                                 description: $("tryon-desc").value, aspect: tryonAspect });
     $("tryon-status").replaceChildren();
+    const result = el("img", { src: data.image, alt: "試穿示意照" });
+    const faceNote = el("p", { class: "hint" }, "正在把你原本的臉貼回去…");
+    const toggle = el("div", { class: "row", hidden: "" });
     $("tryon-result").replaceChildren(el("section", { class: "card" },
       el("h2", {}, "試穿結果"),
       el("div", { class: "compare" },
-        el("figure", {}, el("img", { src: tryonPerson, alt: "原本的照片" }), el("figcaption", {}, "原本")),
-        el("figure", {}, el("img", { src: data.image, alt: "試穿示意照" }), el("figcaption", {}, "試穿示意"))),
+        el("figure", {}, el("img", { src: original, alt: "原本的照片" }), el("figcaption", {}, "原本")),
+        el("figure", {}, result, el("figcaption", {}, "試穿示意"))),
+      faceNote, toggle,
       el("p", { class: "hint", style: "margin-top:12px" }, "這是 AI 產生的示意圖，衣服會自動畫成合身的樣子。實際該買哪個尺寸，請用「📏 尺寸推薦」。長按圖片可以儲存。"),
     ));
     $("tryon-result").scrollIntoView({ behavior: "smooth" });
+    keepFace(original, data.image, result, faceNote, toggle);
   } catch (err) {
     tryonError(err.message);
   } finally {
