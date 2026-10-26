@@ -182,3 +182,9 @@ python3 -m http.server -d outfit/standalone 8000
   ```sh
   python3 -m outfit.avatar 我的照片.jpg -o 分身預覽/
   ```
+
+## 示範版（可以直接在手機點的連結）
+
+`python3 -m outfit.demo.build_demo outfit-demo.html` 會把真正的網頁加上 `outfit/demo/demo_backend.js`，
+在瀏覽器裡用範例資料回應所有 API，產生一個不需要伺服器的單一頁面，可以發布成連結在手機上看畫面和流程。
+AI 結果都是標示「示範」的範例；身體尺寸分頁改成連到「照片量身」單機版。
