@@ -57,26 +57,27 @@ class AvatarTests(unittest.TestCase):
             self.assertEqual(body["generationConfig"]["imageConfig"], {"aspectRatio": "3:4"})
         self.assertEqual(len(set(prompts)), 3)
         self.assertTrue(all("standing upright facing the camera" in p for p in prompts))
+        self.assertTrue(all("do not make them thinner" in p and "do not lighten" in p for p in prompts))
         with self.assertRaisesRegex(AnalysisError, "風格"):
             avatar.create_avatar(PHOTO, "image/jpeg", "watercolor", client=self.client)
 
     def test_dressing_sends_the_avatar_first_then_the_garments(self):
-        avatar.dress_avatar(RESULT, "image/png", "game", [(SHOES, "image/png")], "白色帆布鞋", client=self.client)
+        avatar.dress_avatar(RESULT, "image/png", "fashion", [(SHOES, "image/png")], "白色帆布鞋", client=self.client)
         body = FakeGemini.requests[-1][1]
         prompt = body["contents"][0]["parts"][0]["text"]
         self.assertIn("same character", prompt)
-        self.assertIn(avatar.STYLES["game"][1], prompt)
+        self.assertIn(avatar.STYLES["fashion"][1], prompt)
         self.assertIn("白色帆布鞋", prompt)
         self.assertEqual(sent_images(body), [RESULT, SHOES])
         with self.assertRaisesRegex(AnalysisError, "衣服照片"):
-            avatar.dress_avatar(RESULT, "image/png", "game", [], " ", client=self.client)
+            avatar.dress_avatar(RESULT, "image/png", "fashion", [], " ", client=self.client)
 
     def test_saves_one_avatar_on_this_computer(self):
         self.assertIsNone(avatar.load_avatar())
         avatar.save_avatar(b"first", "image/png", "figure")
-        avatar.save_avatar(b"second", "image/jpeg", "game")
+        avatar.save_avatar(b"second", "image/jpeg", "fashion")
         saved = avatar.load_avatar()
-        self.assertEqual((saved["image"], saved["style"], saved["media_type"]), (b"second", "game", "image/jpeg"))
+        self.assertEqual((saved["image"], saved["style"], saved["media_type"]), (b"second", "fashion", "image/jpeg"))
         self.assertEqual(sorted(p.name for p in Path(self.tmp.name).iterdir()), ["avatar.jpg", "avatar.json"])
 
     def test_command_line_writes_one_file_per_style(self):
@@ -86,8 +87,8 @@ class AvatarTests(unittest.TestCase):
         fake = lambda contents, aspect, client=None: {"image": RESULT, "media_type": "image/png", "note": ""}
         with mock.patch("outfit.avatar.generate_image", fake), redirect_stdout(io.StringIO()) as printed:
             avatar.main([str(photo), "-o", str(out)])
-        self.assertEqual(sorted(p.name for p in out.iterdir()), ["me-animation.png", "me-figure.png", "me-game.png"])
-        self.assertIn("Q 版 3D 公仔", printed.getvalue())
+        self.assertEqual(sorted(p.name for p in out.iterdir()), ["me-animation.png", "me-fashion.png", "me-figure.png"])
+        self.assertIn("時尚換裝風", printed.getvalue())
 
 
 class AvatarRouteTests(unittest.TestCase):
@@ -118,7 +119,7 @@ class AvatarRouteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"OUTFIT_DATA_DIR": tmp}):
             try:
                 status, info = call("/api/avatar")
-                self.assertEqual((info["avatar"], info["styles"]["figure"]), (None, "Q 版 3D 公仔"))
+                self.assertEqual((info["avatar"], list(info["styles"])[0]), (None, "fashion"))
                 self.assertIn("先產生", call("/api/avatar/dress", {"description": "鞋子"})[1]["error"])
                 _, preview = call("/api/avatar/preview", {"image": url(PHOTO, "image/jpeg"), "style": "figure"})
                 self.assertEqual(preview["image"], url(b"figure-avatar", "image/png"))

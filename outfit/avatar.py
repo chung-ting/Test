@@ -20,16 +20,23 @@ from google.genai import types
 from .claude import MEDIA_TYPES, AnalysisError
 from .tryon import generate_image
 
+# Styles chosen for broad appeal with women worldwide, modelled on what fashion dress-up games,
+# avatar apps and collectible figures look like. "fashion" comes first: it shows clothes best.
 STYLES = {
-    "figure": ("Q 版 3D 公仔", "a cute chibi 3D collectible vinyl figure: oversized head, small rounded body, "
-               "glossy toy-like materials, soft studio lighting"),
-    "animation": ("3D 動畫電影風", "a stylized 3D animated feature-film character: natural body proportions, "
-                  "expressive face, soft cinematic lighting, detailed fabric"),
-    "game": ("遊戲角色風", "a cheerful 3D life-simulation game character: simple rounded shapes, bright clean "
-             "colors, smooth matte shading"),
+    "fashion": ("時尚換裝風", "a polished 3D fashion dress-up game character: graceful proportions, large bright "
+                "expressive eyes, soft glossy hair, luminous skin, gentle pastel studio lighting, and highly "
+                "detailed true-to-life fabric so the outfit is the star"),
+    "figure": ("療癒 Q 版公仔", "a kawaii chibi 3D collectible figurine: oversized head, small rounded body, rosy "
+               "cheeks, gentle smile, soft pastel colors, matte vinyl-toy finish, soft studio lighting"),
+    "animation": ("3D 動畫電影風", "a warm 3D animated feature-film character: natural body proportions, "
+                  "expressive friendly face, soft cinematic lighting, detailed fabric"),
 }
+# Every style keeps the person's own look; flattering, never "corrected".
+LIKENESS = ("Make it flattering but clearly the same person: keep their real body shape and build (do not make "
+            "them thinner, taller or curvier), their skin tone (do not lighten or darken it), face shape, "
+            "hairstyle and hair color, and glasses or facial hair if any. Tasteful and age-appropriate.")
 POSE = ("Full body from head to shoes, standing upright facing the camera, arms relaxed slightly away from "
-        "the body, on a plain light grey background. No text, logos, frames or packaging.")
+        "the body, on a plain soft pastel background. No text, logos, frames or packaging.")
 ASPECT = 3 / 4
 MAX_GARMENTS = 4
 
@@ -47,9 +54,8 @@ def _image_part(data: bytes, media_type: str):
 def create_avatar(photo: bytes, media_type: str, style: str, client=None) -> dict:
     if style not in STYLES:
         raise AnalysisError(f"未知的風格：{style}")
-    prompt = (f"Turn the person in this photo into {STYLES[style][1]}. Keep what makes them recognisable: "
-              "face shape, hairstyle and hair color, skin tone, glasses or facial hair if any, and the clothes "
-              f"they are wearing with the same colors. {POSE}")
+    prompt = (f"Turn the person in this photo into {STYLES[style][1]}. {LIKENESS} Dress them in the clothes "
+              f"they are wearing in the photo, with the same colors. {POSE}")
     return generate_image([prompt, _image_part(photo, media_type)], ASPECT, client)
 
 
@@ -60,7 +66,7 @@ def dress_avatar(avatar: bytes, avatar_type: str, style: str, garments: list[tup
         raise AnalysisError("請上傳衣服照片，或描述想穿什麼。")
     if len(garments) > MAX_GARMENTS:
         raise AnalysisError(f"一次最多 {MAX_GARMENTS} 件。")
-    prompt = (f"The first image is a character drawn as {STYLES.get(style, STYLES['figure'])[1]}. Redraw exactly "
+    prompt = (f"The first image is a character drawn as {STYLES.get(style, STYLES['fashion'])[1]}. Redraw exactly "
               "the same character, same face, hair, body, art style, pose, framing and background, but wearing "
               "the outfit below. Translate each garment into the character's art style while keeping its "
               "colors, patterns and details. Replace only the items given; keep the rest of the current outfit. "
