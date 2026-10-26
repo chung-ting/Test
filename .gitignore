@@ -3,3 +3,6 @@ __pycache__/
 report.md
 data/cache/
 reports/
+outfit/standalone/vision_bundle.mjs
+outfit/standalone/wasm/
+outfit/standalone/pose_landmarker_full.b64.txt

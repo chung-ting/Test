@@ -1,0 +1,526 @@
+<title>照片量身</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+  /* Layout: one narrow column like a tailor's measurement card; a tape-measure strip heads the page,
+     the photos sit side by side, and the numbers are set in a mono face so they line up. */
+  :root {
+    --paper: #f4f6f8;
+    --surface: #ffffff;
+    --ink: #1b222c;
+    --muted: #5d6877;
+    --line: #d8dde4;
+    --tape: #f1c232;
+    --tape-ink: #2b2200;
+    --tick: #3a3320;
+    --good: #2c7a4d;
+    --warn: #9a5800;
+    --danger: #b3261e;
+    --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #11151b; --surface: #1a2029; --ink: #e7ebf1; --muted: #98a3b2; --line: #2c3542;
+      --tape: #e9b923; --tape-ink: #221a00; --tick: #3b2f08; --good: #72c995; --warn: #f0ae55; --danger: #ff8a80;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #11151b; --surface: #1a2029; --ink: #e7ebf1; --muted: #98a3b2; --line: #2c3542;
+    --tape: #e9b923; --tape-ink: #221a00; --tick: #3b2f08; --good: #72c995; --warn: #f0ae55; --danger: #ff8a80;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font: 16px/1.65 var(--font-body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 48px;
+  }
+  main { max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+  .tape {
+    margin-top: 16px; height: 34px; border-radius: 4px; background: var(--tape); color: var(--tape-ink);
+    background-image:
+      repeating-linear-gradient(90deg, var(--tick) 0 1.5px, transparent 1.5px 50px),
+      repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 10px);
+    background-size: 100% 16px, 100% 8px; background-repeat: no-repeat; background-position: 0 0, 0 0;
+    display: flex; align-items: flex-end; justify-content: space-between; padding: 0 8px 3px;
+    font: 600 11px/1 var(--font-num); letter-spacing: .02em;
+  }
+  header h1 { font-size: 1.75rem; line-height: 1.25; margin: 14px 0 4px; text-wrap: balance; }
+  header p { color: var(--muted); margin: 0; }
+
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .step { font: 600 .75rem/1 var(--font-num); color: var(--tape-ink); background: var(--tape); border-radius: 4px; padding: 4px 6px; }
+  .muted { color: var(--muted); font-size: .9rem; }
+
+  label.field { display: flex; flex-direction: column; gap: 4px; font-weight: 500; max-width: 14em; }
+  input[type=number] {
+    font: 600 1.05rem var(--font-num); color: var(--ink); background: var(--paper);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%;
+  }
+  input:focus-visible, button:focus-visible, .pick:focus-within { outline: 2px solid var(--tape); outline-offset: 2px; }
+
+  .rules { margin: 0 0 14px; padding-left: 1.2em; color: var(--muted); font-size: .92rem; }
+  .rules b { color: var(--ink); font-weight: 600; }
+  .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .slot { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .slot-title { font-weight: 700; }
+  .frame {
+    aspect-ratio: 3 / 4; max-width: 100%; border: 1.5px dashed var(--line); border-radius: 10px; background: var(--paper);
+    display: grid; place-items: center; overflow: hidden;
+  }
+  .frame svg { width: 46%; height: auto; color: var(--muted); }
+  .frame canvas { width: 100%; height: 100%; object-fit: contain; }
+  .pick-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pick {
+    position: relative; flex: 1; text-align: center; border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px;
+    font-size: .9rem; cursor: pointer; background: var(--surface); color: var(--ink); white-space: nowrap;
+  }
+  .pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+
+  button { font: inherit; cursor: pointer; }
+  .primary {
+    width: 100%; margin-top: 14px; border: 0; border-radius: 10px; padding: 14px; font-weight: 700; font-size: 1.05rem;
+    background: var(--ink); color: var(--paper);
+  }
+  .primary:disabled { opacity: .35; cursor: default; }
+  .secondary { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 14px; }
+
+  .status { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+  .status .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .status .bar i { display: block; height: 100%; background: var(--tape); width: 0; transition: width .2s; }
+  .error { color: var(--danger); font-weight: 500; }
+
+  .result-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chip { font: 600 .75rem/1 var(--font-num); border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; padding: 4px 8px; }
+  .chip.ok { border-color: var(--good); color: var(--good); }
+  table.measures { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .measures td { padding: 10px 2px; border-top: 1px solid var(--line); vertical-align: baseline; }
+  .measures td.v { text-align: right; font: 600 1.35rem var(--font-num); white-space: nowrap; }
+  .measures td.v small { font: 500 .8rem var(--font-body); color: var(--muted); margin-left: 2px; }
+  .measures td.alt { text-align: right; color: var(--muted); font: 500 .85rem var(--font-num); white-space: nowrap; width: 5.5em; }
+  .measures .tag { font-size: .75rem; color: var(--good); margin-left: 6px; }
+  .warn { color: var(--warn); margin: 6px 0; }
+  .note { color: var(--muted); font-size: .88rem; margin: 10px 0 0; }
+
+  .calib { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
+  .calib label { display: flex; flex-direction: column; gap: 4px; font-size: .9rem; font-weight: 500; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .privacy { color: var(--muted); font-size: .82rem; text-align: center; margin: 0; }
+
+  @media (max-width: 360px) { .calib { grid-template-columns: 1fr 1fr; } }
+  @media (prefers-reduced-motion: reduce) { .status .bar i { transition: none; } }
+</style>
+
+<main>
+  <header>
+    <div class="tape" aria-hidden="true"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
+    <h1>照片量身</h1>
+    <p>輸入身高，拍正面和側面兩張全身照，算出你的肩寬、三圍和腿長。</p>
+  </header>
+
+  <section>
+    <h2><span class="step">01</span>身高</h2>
+    <label class="field" for="height">身高（公分）
+      <input id="height" type="number" inputmode="decimal" min="100" max="230" step="0.5" placeholder="170">
+    </label>
+  </section>
+
+  <section>
+    <h2><span class="step">02</span>拍兩張全身照</h2>
+    <ul class="rules">
+      <li>穿<b>貼身衣服</b>（緊身上衣、內搭褲），長髮綁起來</li>
+      <li>請別人拍或用腳架：手機在<b>腰的高度</b>、距離 2–3 公尺，<b>頭頂到腳底都要入鏡</b></li>
+      <li>背景單純、光線充足</li>
+      <li><b>正面</b>：雙手往外張開約 30 度，雙腳與肩同寬</li>
+      <li><b>側面</b>：轉 90 度，手自然垂下，站直</li>
+    </ul>
+    <div class="photos">
+      <div class="slot">
+        <span class="slot-title">正面</span>
+        <div class="frame" id="front-frame">
+          <svg viewBox="0 0 60 120" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-label="正面站姿示意">
+            <circle cx="30" cy="12" r="8" fill="none"/>
+            <path d="M30 20v42M30 28l-20 24M30 28l20 24M30 62l-12 50M30 62l12 50"/>
+          </svg>
+        </div>
+        <div class="pick-row">
+          <label class="pick">📷 拍照<input id="front-camera" type="file" accept="image/*" capture="environment"></label>
+          <label class="pick">相簿<input id="front-gallery" type="file" accept="image/*"></label>
+        </div>
+      </div>
+      <div class="slot">
+        <span class="slot-title">側面</span>
+        <div class="frame" id="side-frame">
+          <svg viewBox="0 0 60 120" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-label="側面站姿示意">
+            <circle cx="30" cy="12" r="8" fill="none"/>
+            <path d="M30 20v42M30 28l2 30M30 62l-1 50M30 62l2 50"/>
+          </svg>
+        </div>
+        <div class="pick-row">
+          <label class="pick">📷 拍照<input id="side-camera" type="file" accept="image/*" capture="environment"></label>
+          <label class="pick">相簿<input id="side-gallery" type="file" accept="image/*"></label>
+        </div>
+      </div>
+    </div>
+    <button class="primary" id="compute" disabled>計算身體尺寸</button>
+  </section>
+
+  <div id="status" hidden></div>
+
+  <section id="result" aria-live="polite"></section>
+
+  <section id="calibration" hidden>
+    <h2><span class="step">03</span>用軟尺校正一次</h2>
+    <p class="muted">用軟尺量一次，填進來按「校正」。之後重拍都會自動修正，圍度會準很多。胸圍量胸部最高點一圈，腰圍量肚臍上方最細處，臀圍量臀部最翹處一圈。有量的填就好。</p>
+    <div class="calib">
+      <label for="tape-chest">胸圍<input id="tape-chest" type="number" inputmode="decimal" step="0.5" placeholder="cm"></label>
+      <label for="tape-waist">腰圍<input id="tape-waist" type="number" inputmode="decimal" step="0.5" placeholder="cm"></label>
+      <label for="tape-hip">臀圍<input id="tape-hip" type="number" inputmode="decimal" step="0.5" placeholder="cm"></label>
+    </div>
+    <div class="actions">
+      <button class="secondary" id="calibrate">校正</button>
+      <button class="secondary" id="reset-calibration" hidden>清除校正</button>
+    </div>
+    <p class="note" id="calib-msg"></p>
+  </section>
+
+  <p class="privacy">照片只在這支手機上分析，不會上傳。身高、尺寸和校正值只存在這個瀏覽器。</p>
+</main>
+
+<script src="measure.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const PHOTO_SIDE = 1024;
+const LEVEL_NAMES = { chest: "胸", waist: "腰", hip: "臀", crotch: "跨下" };
+const INCH_KEYS = ["waist", "inseam"]; // jeans in Taiwan are sized by waist and inseam in inches
+const EXAMPLE = {
+  measurements: [
+    { key: "shoulder", label: "肩寬", value: 41.5 }, { key: "chest", label: "胸圍", value: 88.0 },
+    { key: "waist", label: "腰圍", value: 72.5 }, { key: "hip", label: "臀圍", value: 93.0 },
+    { key: "inseam", label: "內側腿長", value: 76.0 }, { key: "arm", label: "手臂長", value: 55.5 },
+  ],
+  warnings: [],
+};
+
+const store = {
+  get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} },
+};
+const photos = { front: null, side: null };
+let calibration = store.get("outfit.calibration") || {};
+let lastResult = null;
+let landmarkerPromise = null;
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of children) if (c != null && c !== false) node.append(c);
+  return node;
+}
+
+// ---------- status ----------
+function showProgress(text, fraction = null) {
+  const bar = el("div", { class: "bar" }, el("i"));
+  if (fraction !== null) bar.firstChild.style.width = `${Math.round(fraction * 100)}%`;
+  $("status").replaceChildren(el("section", { class: "status" }, el("span", {}, text), bar));
+  $("status").hidden = false;
+}
+function showError(text) {
+  $("status").replaceChildren(el("section", {}, el("p", { class: "error", style: "margin:0" }, text)));
+  $("status").hidden = false;
+}
+function clearStatus() { $("status").hidden = true; }
+
+// ---------- MediaPipe (files are published next to this page) ----------
+async function fetchWithProgress(url, onProgress) {
+  const res = await fetch(url);
+  if (!res.ok || !res.body) throw new Error("model download failed");
+  const total = Number(res.headers.get("Content-Length")) || 12.6e6;
+  const reader = res.body.getReader();
+  const chunks = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    got += value.length;
+    onProgress(Math.min(1, got / total));
+  }
+  const out = new Uint8Array(got);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
+}
+
+// The model is published as base64 text because the host only serves web file types.
+function decodeBase64(bytes) {
+  const binary = atob(new TextDecoder().decode(bytes).trim());
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function getLandmarker() {
+  if (!landmarkerPromise) {
+    landmarkerPromise = (async () => {
+      const { PoseLandmarker } = await import(new URL("vision_bundle.mjs", document.baseURI).href);
+      const model = decodeBase64(await fetchWithProgress("pose_landmarker_full.b64.txt",
+        (p) => showProgress("下載人體偵測模型（第一次約 22 MB）", p * 0.9)));
+      showProgress("準備人體偵測…", 0.95);
+      const fileset = {
+        wasmLoaderPath: new URL("wasm/vision_wasm_internal.js", document.baseURI).href,
+        wasmBinaryPath: new URL("wasm/vision_wasm_internal.wasm", document.baseURI).href,
+      };
+      const options = (delegate) => ({
+        baseOptions: { modelAssetBuffer: model, delegate },
+        runningMode: "IMAGE", numPoses: 1, outputSegmentationMasks: true,
+      });
+      try { return await PoseLandmarker.createFromOptions(fileset, options("GPU")); }
+      catch { return await PoseLandmarker.createFromOptions(fileset, options("CPU")); }
+    })();
+    landmarkerPromise.catch(() => { landmarkerPromise = null; });
+  }
+  return landmarkerPromise;
+}
+
+// ---------- photo analysis ----------
+function loadCanvas(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, PHOTO_SIDE / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(img.src);
+      resolve(canvas);
+    };
+    img.onerror = () => reject(new Error("讀不到這張照片，請換一張"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Keep only the mask region connected to the torso, so background specks can't stretch the silhouette.
+function personRuns(mask, w, h, seedX, seedY) {
+  const on = (i) => mask[i] > 0.5;
+  let seed = -1;
+  for (let r = 0; r <= 30 && seed < 0; r += 2) {
+    for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
+      const x = Math.round(seedX + dx), y = Math.round(seedY + dy);
+      if (x >= 0 && x < w && y >= 0 && y < h && on(y * w + x)) { seed = y * w + x; break; }
+    }
+  }
+  if (seed < 0) throw new Error("看不清楚身體輪廓，請換一張背景單純的照片");
+  const keep = new Uint8Array(w * h);
+  const stack = [seed];
+  keep[seed] = 1;
+  while (stack.length) {
+    const i = stack.pop(), x = i % w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+      if (j >= 0 && j < w * h && !keep[j] && on(j)) { keep[j] = 1; stack.push(j); }
+    }
+  }
+  const rows = [];
+  for (let y = 0; y < h; y++) {
+    const runs = [];
+    let start = -1;
+    for (let x = 0; x <= w; x++) {
+      const v = x < w && keep[y * w + x];
+      if (v && start < 0) start = x;
+      if (!v && start >= 0) { runs.push([start, x - 1]); start = -1; }
+    }
+    rows.push(runs);
+  }
+  return { rows, keep };
+}
+
+async function scanPhoto(file) {
+  const canvas = await loadCanvas(file);
+  const landmarker = await getLandmarker();
+  showProgress("分析照片中…", 1);
+  const result = landmarker.detect(canvas);
+  const mask = result.segmentationMasks?.[0];
+  try {
+    if (!result.landmarks.length || !mask) throw new Error("照片裡偵測不到人，請換一張全身照");
+    const w = mask.width, h = mask.height;
+    const landmarks = result.landmarks[0].map((p) => [p.x * w, p.y * h, p.visibility ?? 0]);
+    const torso = [11, 12, 23, 24].map((i) => landmarks[i]);
+    const cx = torso.reduce((s, p) => s + p[0], 0) / 4, cy = torso.reduce((s, p) => s + p[1], 0) / 4;
+    const { rows, keep } = personRuns(mask.getAsFloat32Array(), w, h, cx, cy);
+    return { canvas, keep, data: { height: h, landmarks, rows } };
+  } finally {
+    mask?.close();
+  }
+}
+
+function drawPhoto(which, levels) {
+  const p = photos[which];
+  const out = document.createElement("canvas");
+  out.width = p.canvas.width;
+  out.height = p.canvas.height;
+  out.setAttribute("aria-label", which === "front" ? "正面照與偵測到的輪廓" : "側面照與偵測到的輪廓");
+  const ctx = out.getContext("2d");
+  ctx.drawImage(p.canvas, 0, 0);
+  if (p.keep.length === out.width * out.height) {
+    const img = ctx.getImageData(0, 0, out.width, out.height);
+    for (let i = 0; i < p.keep.length; i++) {
+      if (!p.keep[i]) continue;
+      img.data[i * 4] = img.data[i * 4] * 0.55 + 241 * 0.45;
+      img.data[i * 4 + 1] = img.data[i * 4 + 1] * 0.55 + 194 * 0.45;
+      img.data[i * 4 + 2] = img.data[i * 4 + 2] * 0.55 + 50 * 0.45;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  const lw = Math.max(2, out.width / 180);
+  ctx.lineWidth = lw;
+  ctx.font = `700 ${lw * 7}px sans-serif`;
+  for (const [key, y] of Object.entries(levels || {})) {
+    ctx.strokeStyle = "#1b222c";
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(out.width, y); ctx.stroke();
+    ctx.fillStyle = "#1b222c";
+    ctx.fillRect(0, y - lw * 9, lw * 16, lw * 9);
+    ctx.fillStyle = "#f1c232";
+    ctx.fillText(LEVEL_NAMES[key] || key, lw * 1.5, y - lw * 2);
+  }
+  $(which + "-frame").replaceChildren(out);
+}
+
+function updateComputeButton() {
+  $("compute").disabled = !(photos.front && photos.side && parseFloat($("height").value) > 0);
+}
+
+for (const which of ["front", "side"]) {
+  for (const source of ["camera", "gallery"]) {
+    $(`${which}-${source}`).addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      e.target.value = "";
+      if (!file) return;
+      showProgress(landmarkerPromise ? "分析照片中…" : "載入人體偵測…", 0);
+      try {
+        photos[which] = await scanPhoto(file);
+        drawPhoto(which);
+        clearStatus();
+      } catch (err) {
+        photos[which] = null;
+        const msg = String(err && err.message || err);
+        showError(/fetch|import|network|wasm|download|Failed to/i.test(msg)
+          ? "人體偵測模型載入失敗，請確認網路後重新選照片" : msg);
+      }
+      updateComputeButton();
+    });
+  }
+}
+
+// ---------- measuring ----------
+function compute() {
+  const height = parseFloat($("height").value);
+  try {
+    const result = BodyMeasure.measure(photos.front.data, photos.side.data, height, calibration);
+    lastResult = { ...result, height };
+    store.set("outfit.body", { height, measurements: result.measurements, measuredAt: new Date().toISOString() });
+    drawPhoto("front", result.levels.front);
+    drawPhoto("side", result.levels.side);
+    clearStatus();
+    renderResult(lastResult, false);
+    $("calibration").hidden = false;
+  } catch (err) {
+    showError(err.message);
+  }
+}
+$("compute").addEventListener("click", () => {
+  compute();
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+function resultText(r) {
+  const lines = [`身高 ${r.height} cm`];
+  for (const m of r.measurements) lines.push(`${m.label} ${m.value} cm（照片原始值 ${m.raw}${m.calibrated ? "，已校正" : ""}）`);
+  return lines.join("\n");
+}
+
+function renderResult(r, example) {
+  const rows = r.measurements.map((m) => el("tr", {},
+    el("td", {}, m.label, m.calibrated ? el("span", { class: "tag" }, "已校正") : null),
+    el("td", { class: "v" }, m.value.toFixed(1), el("small", {}, "cm")),
+    el("td", { class: "alt" }, INCH_KEYS.includes(m.key) ? `${(m.value / 2.54).toFixed(1)} 吋` : ""),
+  ));
+  const copy = el("button", { class: "secondary", id: "copy" }, "複製結果");
+  copy.addEventListener("click", async () => {
+    const text = resultText(r);
+    try { await navigator.clipboard.writeText(text); copy.textContent = "已複製"; }
+    catch {
+      const area = el("textarea", { rows: "7", style: "width:100%;margin-top:8px", readonly: "" });
+      area.value = text;
+      copy.after(area);
+      area.select();
+    }
+  });
+  $("result").replaceChildren(...[
+    el("div", { class: "result-head" },
+      el("h2", { style: "margin:0" }, example ? "範例結果" : "你的身體尺寸"),
+      example ? el("span", { class: "chip" }, "範例") : el("span", { class: "chip ok" }, "已存在這個瀏覽器")),
+    example ? el("p", { class: "muted" }, "這是範例。選好兩張照片並按「計算身體尺寸」後，會換成你的數字。") : null,
+    ...r.warnings.map((w) => el("p", { class: "warn" }, "⚠ " + w)),
+    el("table", { class: "measures" }, ...rows),
+    el("p", { class: "note" }, "圍度大約有 ±3–5 cm 的誤差，長度大約 ±2 cm。用軟尺校正一次後，之後重拍會準很多。"),
+    example ? null : el("div", { class: "actions", style: "margin-top:12px" }, copy),
+  ].filter(Boolean));
+}
+
+// ---------- calibration ----------
+function syncCalibrationButtons() { $("reset-calibration").hidden = !Object.keys(calibration).length; }
+$("calibrate").addEventListener("click", () => {
+  if (!lastResult) return;
+  const next = { ...calibration };
+  for (const key of ["chest", "waist", "hip"]) {
+    const tape = parseFloat($("tape-" + key).value);
+    const m = lastResult.measurements.find((x) => x.key === key);
+    if (!(tape > 0) || !m) continue;
+    const factor = tape / m.raw;
+    if (factor < 0.8 || factor > 1.25) {
+      $("calib-msg").textContent = `${m.label}：軟尺量的 ${tape} 和照片算的 ${m.raw} 差太多。請確認量法，或穿貼身衣服重拍。`;
+      return;
+    }
+    next[key] = Math.round(factor * 1000) / 1000;
+  }
+  calibration = next;
+  store.set("outfit.calibration", calibration);
+  $("calib-msg").textContent = "已校正。之後的結果都會套用。";
+  syncCalibrationButtons();
+  compute();
+});
+$("reset-calibration").addEventListener("click", () => {
+  calibration = {};
+  store.set("outfit.calibration", calibration);
+  $("calib-msg").textContent = "已清除校正。";
+  syncCalibrationButtons();
+  if (lastResult) compute();
+});
+
+// ---------- start ----------
+$("height").value = store.get("outfit.height") ?? "";
+$("height").addEventListener("input", () => {
+  store.set("outfit.height", parseFloat($("height").value) || null);
+  updateComputeButton();
+});
+syncCalibrationButtons();
+const saved = store.get("outfit.body");
+if (saved && Array.isArray(saved.measurements)) {
+  renderResult({ ...saved, warnings: [] }, false);
+  $("result").querySelector(".chip").textContent = `上次量的 · ${new Date(saved.measuredAt).toLocaleDateString("zh-TW")}`;
+  $("result").querySelector("#copy")?.remove();
+} else {
+  renderResult(EXAMPLE, true);
+}
+</script>

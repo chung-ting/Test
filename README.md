@@ -126,6 +126,17 @@ python3 -m outfit --host 0.0.0.0         # 讓同一個 Wi-Fi 的手機用 http:
   之後會自動乘上個人校正係數（只存在瀏覽器）。
 - 姿勢不標準、看不到肩膀臀部、頭腳被切到、正側面拍反等情況會直接提示重拍。
 
+### 手機單機版（`outfit/standalone/`）
+
+同樣的身體尺寸計算，做成不需要伺服器的單一網頁：計算在瀏覽器裡跑（`measure.js` 是 `body.py`
+的 JavaScript 版本，`tests/test_body.py` 會用 node 檢查兩者結果一致），MediaPipe 的程式、WASM 和模型
+跟網頁放在同一個資料夾。
+
+```sh
+outfit/standalone/fetch_assets.sh   # 下載 MediaPipe 檔案（約 22 MB，不進 git）
+python3 -m http.server -d outfit/standalone 8000
+```
+
 ## 尺寸推薦（「📏 尺寸推薦」分頁）
 
 1. 量一件自己穿起來最合身的衣服（平放、公分）：上衣量胸寬／肩寬／衣長／袖長，褲子量腰寬／臀寬／大腿寬／褲長。

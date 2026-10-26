@@ -1,5 +1,9 @@
+import json
 import math
+import shutil
+import subprocess
 import unittest
+from pathlib import Path
 
 from outfit import AnalysisError
 from outfit.body import ellipse_circumference, measure
@@ -116,6 +120,42 @@ class BodyTests(unittest.TestCase):
                 measure(FRONT, SIDE, height)
         with self.assertRaisesRegex(AnalysisError, "格式錯誤"):
             measure({"height": 1000}, SIDE, HEIGHT_CM)
+
+
+MEASURE_JS = Path(__file__).resolve().parent.parent / "outfit" / "standalone" / "measure.js"
+NODE_RUNNER = """
+const { measure } = require(process.argv[1]);
+const cases = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.log(JSON.stringify(cases.map(([front, side, height, calibration]) => {
+  try { return measure(front, side, height, calibration); } catch (e) { return { error: e.message }; }
+})));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+class JavaScriptPortTests(unittest.TestCase):
+    """The standalone page runs outfit/standalone/measure.js; it must agree with body.py."""
+
+    def test_matches_python(self):
+        closed = silhouette(chest=150, waist=120, hip=160, shoulder_dx=90, legs_apart=False)
+        no_arms = dict(FRONT, landmarks=[[x, y, 0.1 if i in (13, 15) else v] for i, (x, y, v) in enumerate(FRONT["landmarks"])])
+        cases = [
+            (FRONT, SIDE, HEIGHT_CM, {}),
+            (FRONT, SIDE, 182.5, {"waist": 1.1, "chest": 3, "inseam": 1.2}),
+            (closed, SIDE, HEIGHT_CM, {}),
+            (no_arms, SIDE, HEIGHT_CM, {}),
+            (FRONT, FRONT, HEIGHT_CM, {}),
+            (SIDE, SIDE, HEIGHT_CM, {}),
+            (FRONT, SIDE, 50, {}),
+        ]
+        out = subprocess.run(["node", "-e", NODE_RUNNER, str(MEASURE_JS)], input=json.dumps(cases),
+                             capture_output=True, text=True, check=True)
+        for (front, side, height, calibration), js in zip(cases, json.loads(out.stdout)):
+            try:
+                py = measure(front, side, height, calibration)
+            except AnalysisError as e:
+                py = {"error": str(e)}
+            self.assertEqual(js, py)
 
 
 if __name__ == "__main__":
