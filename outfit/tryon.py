@@ -100,21 +100,25 @@ def try_on(person: bytes, media_type: str, garments: list[tuple[bytes, str]], de
 
 def try_on_gemini(person: bytes, media_type: str, garments: list[tuple[bytes, str]], description: str,
                   aspect: float | None = None, client=None) -> dict:
-    contents = build_contents(person, media_type, garments, description)
+    return generate_image(build_contents(person, media_type, garments, description), aspect, client)
+
+
+def generate_image(contents: list, aspect: float | None = None, client=None) -> dict:
+    """Run a Gemini image model on the prompt and images; returns {image, media_type, note}."""
     image_config = None
     if isinstance(aspect, (int, float)) and not isinstance(aspect, bool) and 0.2 < aspect < 5:
         image_config = types.ImageConfig(aspect_ratio=nearest_aspect_ratio(aspect))
     try:
         client = client or genai.Client()
     except ValueError:
-        raise AnalysisError("伺服器還沒設定 GEMINI_API_KEY，無法產生試穿照。") from None
+        raise AnalysisError("伺服器還沒設定 GEMINI_API_KEY，無法產生圖片。") from None
     try:
         response = client.models.generate_content(
             model=MODEL, contents=contents,
             config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"], image_config=image_config),
         )
     except errors.APIError as e:
-        log.exception("Gemini try-on call failed")
+        log.exception("Gemini image call failed")
         if e.code in (401, 403) or (e.code == 400 and "API key" in str(e)):
             raise AnalysisError("Gemini API 金鑰無效或沒有權限，請確認 GEMINI_API_KEY。") from None
         if e.code == 404:

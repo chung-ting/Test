@@ -1,4 +1,4 @@
-"""Serve the outfit web app (styling advice, body measurements, sizes, try-on): python3 -m outfit [--host 0.0.0.0] [--port 8000]"""
+"""Serve the outfit web app (styling advice, body measurements, sizes, try-on, avatars): python3 -m outfit [--host 0.0.0.0] [--port 8000]"""
 
 import argparse
 import base64
@@ -10,6 +10,7 @@ from pathlib import Path
 
 import anthropic
 
+from . import avatar
 from .analyze import OCCASIONS, analyze
 from .body import measure
 from .claude import AnalysisError
@@ -33,10 +34,16 @@ def decode_data_url(data_url: str) -> tuple[bytes, str]:
         raise AnalysisError("圖片格式錯誤") from None
 
 
+def data_url(data: bytes, media_type: str) -> str:
+    return f"data:{media_type};base64,{base64.b64encode(data).decode()}"
+
+
 class Handler(BaseHTTPRequestHandler):
     analyzer = staticmethod(analyze)
     chart_reader = staticmethod(extract_chart)
     dresser = staticmethod(try_on)
+    avatar_maker = staticmethod(avatar.create_avatar)
+    avatar_dresser = staticmethod(avatar.dress_avatar)
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -58,6 +65,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, file.read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/api/occasions":
             self._json(200, OCCASIONS)
+        elif self.path == "/api/avatar":
+            saved = avatar.load_avatar()
+            mine = saved and {"image": data_url(saved["image"], saved["media_type"]), "style": saved["style"]}
+            self._json(200, {"styles": {k: label for k, (label, _) in avatar.STYLES.items()}, "avatar": mine})
         elif self.path == "/api/tryon-info":
             self._json(200, tryon_info())
         elif self.path == "/api/measures":
@@ -82,11 +93,31 @@ class Handler(BaseHTTPRequestHandler):
         person, media_type = decode_data_url(body.get("image", ""))
         garments = [decode_data_url(g) for g in body.get("garments") or []]
         result = self.dresser(person, media_type, garments, body.get("description", ""), body.get("aspect"))
-        image = base64.b64encode(result["image"]).decode()
-        return {"image": f"data:{result['media_type']};base64,{image}", "note": result["note"]}
+        return {"image": data_url(result["image"], result["media_type"]), "note": result["note"]}
+
+    def _avatar_preview(self, body: dict) -> dict:
+        result = self.avatar_maker(*decode_data_url(body.get("image", "")), body.get("style", ""))
+        return {"image": data_url(result["image"], result["media_type"])}
+
+    def _avatar_save(self, body: dict) -> dict:
+        style = body.get("style", "")
+        if style not in avatar.STYLES:
+            raise AnalysisError(f"未知的風格：{style}")
+        avatar.save_avatar(*decode_data_url(body.get("image", "")), style)
+        return {"saved": True}
+
+    def _avatar_dress(self, body: dict) -> dict:
+        saved = avatar.load_avatar()
+        if saved is None:
+            raise AnalysisError("還沒有分身，請先產生並選一個分身。")
+        garments = [decode_data_url(g) for g in body.get("garments") or []]
+        result = self.avatar_dresser(saved["image"], saved["media_type"], saved["style"], garments,
+                                     body.get("description", ""))
+        return {"image": data_url(result["image"], result["media_type"])}
 
     ROUTES = {"/api/analyze": _analyze, "/api/size-chart": _size_chart, "/api/recommend-size": _recommend_size,
-              "/api/body-measure": _body_measure, "/api/try-on": _try_on}
+              "/api/body-measure": _body_measure, "/api/try-on": _try_on, "/api/avatar/preview": _avatar_preview,
+              "/api/avatar/save": _avatar_save, "/api/avatar/dress": _avatar_dress}
 
     def do_POST(self):
         route = self.ROUTES.get(self.path)

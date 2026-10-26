@@ -82,6 +82,10 @@
   .compare img { width: 100%; border-radius: 10px; display: block; }
   .compare figcaption { color: var(--muted); font-size: .85rem; text-align: center; margin-top: 4px; }
   .look .tryon-btn { margin-top: 8px; }
+  .style-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .style-grid .card { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .style-grid img { width: 100%; border-radius: 10px; display: block; background: var(--bg); }
+  .style-grid h3 { margin: 0; font-size: 1rem; }
   .chart-table { border-collapse: collapse; font-size: .9rem; }
   .chart-table th, .chart-table td { padding: 4px; text-align: center; white-space: nowrap; }
   .chart-table input { width: 4.5em; margin: 0; padding: 4px 6px; }
@@ -102,6 +106,7 @@
   <h1>穿搭分析</h1>
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="analyze" aria-selected="true">👗 穿搭建議</button>
+    <button role="tab" data-tab="avatar" aria-selected="false">🧸 分身</button>
     <button role="tab" data-tab="body" aria-selected="false">🧍 身體尺寸</button>
     <button role="tab" data-tab="size" aria-selected="false">📏 尺寸推薦</button>
     <button role="tab" data-tab="tryon" aria-selected="false">👕 試穿</button>
@@ -129,6 +134,44 @@
   <div id="status"></div>
   <div id="result"></div>
   <p class="privacy">照片會傳送到 Anthropic 的 Claude 進行分析，本站不會儲存。</p>
+  </div>
+
+  <div id="tab-avatar" hidden>
+  <p class="sub">用你的照片做一個可愛的 3D 風格分身，之後可以幫分身換上不同的衣服。</p>
+
+  <section class="card" id="my-avatar-card" hidden>
+    <h2>我的分身</h2>
+    <div class="compare">
+      <figure><img id="my-avatar" alt="我的分身"><figcaption id="my-avatar-style"></figcaption></figure>
+      <figure id="dressed-figure" hidden><img id="dressed-avatar" alt="換裝後的分身"><figcaption>換裝後</figcaption></figure>
+    </div>
+    <h2 style="margin-top:16px">幫分身換裝</h2>
+    <p class="hint">上傳衣服或鞋子的照片（每張一件，最多 4 件），也可以用文字描述。</p>
+    <textarea id="dress-desc" rows="2" maxlength="300" placeholder="例如：換成白色帆布鞋"></textarea>
+    <div class="row" style="margin-top:12px">
+      <label class="btn">👚 上傳衣服照片<input id="dress-garments" type="file" accept="image/*" multiple></label>
+      <button id="dress-clear" hidden>清除</button>
+    </div>
+    <div id="dress-list" class="thumbs"></div>
+    <button class="btn-primary" id="dress-submit" disabled>幫分身換上</button>
+    <div id="dress-status"></div>
+  </section>
+
+  <section class="card">
+    <h2 id="avatar-make-title">1. 拍一張全身照</h2>
+    <p class="hint">正面、全身入鏡、光線充足效果最好。會用目前穿的衣服當分身的第一套衣服。</p>
+    <div class="row">
+      <label class="btn">📷 拍照<input id="avatar-camera" type="file" accept="image/*" capture="environment"></label>
+      <label class="btn">🖼️ 從相簿選<input id="avatar-gallery" type="file" accept="image/*"></label>
+    </div>
+    <img id="avatar-photo" class="preview" alt="你的照片">
+    <button class="btn-primary" id="avatar-submit" disabled>產生三種風格</button>
+    <p class="hint" style="margin-top:8px">三種風格會各產生一張，總共大約 30 秒、NT$3–6。</p>
+  </section>
+
+  <div id="avatar-status"></div>
+  <div id="avatar-options" class="style-grid"></div>
+  <p class="privacy">照片會傳送到 Google 的 Gemini 產生分身。選好的分身存在跑這個 App 的電腦裡。</p>
   </div>
 
   <div id="tab-body" hidden>
@@ -678,6 +721,97 @@ function render(d) {
     ));
   });
 }
+
+// ---------- avatar ----------
+let avatarPhoto = null;
+let avatarStyles = {};
+let dressGarments = [];
+
+function avatarError(where, msg) { $(where).replaceChildren(el("div", { class: "card error" }, msg)); }
+function loading(msg) { return el("div", { class: "card loading" }, el("div", { class: "spinner" }), msg); }
+
+function showMyAvatar(mine) {
+  $("my-avatar-card").hidden = !mine;
+  if (!mine) return;
+  $("my-avatar").src = mine.image;
+  $("my-avatar-style").textContent = avatarStyles[mine.style] || "";
+  $("dressed-figure").hidden = true;
+  $("avatar-make-title").textContent = "重新做一個分身";
+}
+fetch("/api/avatar").then((r) => r.json()).then((d) => { avatarStyles = d.styles; showMyAvatar(d.avatar); });
+
+for (const id of ["avatar-camera", "avatar-gallery"]) {
+  $(id).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      avatarPhoto = await resize(file);
+      $("avatar-photo").src = avatarPhoto;
+      $("avatar-photo").style.display = "block";
+      $("avatar-submit").disabled = false;
+    } catch (err) { avatarError("avatar-status", err.message); }
+  };
+}
+
+$("avatar-submit").onclick = async () => {
+  $("avatar-submit").disabled = true;
+  $("avatar-status").replaceChildren();
+  const cards = Object.entries(avatarStyles).map(([style, label]) => {
+    const body = el("div", {}, loading("產生中…"));
+    return [style, label, body, el("section", { class: "card" }, el("h3", {}, label), body)];
+  });
+  $("avatar-options").replaceChildren(...cards.map((c) => c[3]));
+  await Promise.all(cards.map(async ([style, label, body]) => {
+    try {
+      const { image } = await postJSON("/api/avatar/preview", { image: avatarPhoto, style });
+      const choose = el("button", {}, "用這個當我的分身");
+      choose.onclick = async () => {
+        try {
+          await postJSON("/api/avatar/save", { image, style });
+          showMyAvatar({ image, style });
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        } catch (err) { avatarError("avatar-status", err.message); }
+      };
+      body.replaceChildren(el("img", { src: image, alt: `${label}分身` }), choose);
+    } catch (err) {
+      body.replaceChildren(el("p", { class: "error" }, err.message));
+    }
+  }));
+  $("avatar-submit").disabled = false;
+};
+
+function renderDressList() {
+  $("dress-list").replaceChildren(...dressGarments.map((g) => el("img", { src: g, alt: "衣服照片" })));
+  $("dress-clear").hidden = !dressGarments.length;
+  $("dress-submit").disabled = !(dressGarments.length || $("dress-desc").value.trim());
+}
+$("dress-garments").onchange = async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  try { for (const f of files) dressGarments.push(await resize(f)); } catch (err) { avatarError("dress-status", err.message); }
+  if (dressGarments.length > 4) {
+    dressGarments = dressGarments.slice(0, 4);
+    avatarError("dress-status", "一次最多 4 件，只保留前 4 件。");
+  }
+  renderDressList();
+};
+$("dress-clear").onclick = () => { dressGarments = []; renderDressList(); };
+$("dress-desc").oninput = renderDressList;
+$("dress-submit").onclick = async () => {
+  $("dress-submit").disabled = true;
+  $("dress-status").replaceChildren(loading("分身換裝中，大約 10–20 秒…"));
+  try {
+    const { image } = await postJSON("/api/avatar/dress", { garments: dressGarments, description: $("dress-desc").value });
+    $("dressed-avatar").src = image;
+    $("dressed-figure").hidden = false;
+    $("dress-status").replaceChildren();
+  } catch (err) {
+    avatarError("dress-status", err.message);
+  } finally {
+    renderDressList();
+  }
+};
 
 // ---------- try-on ----------
 let MAX_GARMENTS = 3;
