@@ -1,4 +1,4 @@
-"""Serve the outfit analysis and size recommendation web app: python3 -m outfit [--host 0.0.0.0] [--port 8000]"""
+"""Serve the outfit web app (styling advice, body measurements, sizes, try-on): python3 -m outfit [--host 0.0.0.0] [--port 8000]"""
 
 import argparse
 import base64
@@ -14,6 +14,7 @@ from .analyze import OCCASIONS, analyze
 from .body import measure
 from .claude import AnalysisError
 from .sizing import MEASURES, extract_chart, recommend
+from .tryon import try_on
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 15 * 1024 * 1024
@@ -34,6 +35,7 @@ def decode_data_url(data_url: str) -> tuple[bytes, str]:
 class Handler(BaseHTTPRequestHandler):
     analyzer = staticmethod(analyze)
     chart_reader = staticmethod(extract_chart)
+    dresser = staticmethod(try_on)
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -68,8 +70,15 @@ class Handler(BaseHTTPRequestHandler):
     def _body_measure(self, body: dict) -> dict:
         return measure(body.get("front"), body.get("side"), body.get("height_cm"), body.get("calibration"))
 
+    def _try_on(self, body: dict) -> dict:
+        person, media_type = decode_data_url(body.get("image", ""))
+        garments = [decode_data_url(g) for g in body.get("garments") or []]
+        result = self.dresser(person, media_type, garments, body.get("description", ""))
+        image = base64.b64encode(result["image"]).decode()
+        return {"image": f"data:{result['media_type']};base64,{image}", "note": result["note"]}
+
     ROUTES = {"/api/analyze": _analyze, "/api/size-chart": _size_chart, "/api/recommend-size": _recommend_size,
-              "/api/body-measure": _body_measure}
+              "/api/body-measure": _body_measure, "/api/try-on": _try_on}
 
     def do_POST(self):
         route = self.ROUTES.get(self.path)

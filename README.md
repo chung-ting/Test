@@ -104,8 +104,9 @@ python3 -m twpred signal --start 2021-01-01 --end 2026-10-23 --top 10
 適合的剪裁與顏色（附色票），並提出 3 套完整穿搭建議。資料來源就是使用者拍的照片，不需要外部資料庫。
 
 ```sh
-pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...      # 從 https://console.anthropic.com 取得
+pip install anthropic google-genai
+export ANTHROPIC_API_KEY=sk-ant-...      # 從 https://console.anthropic.com 取得（穿搭建議、讀尺寸表）
+export GEMINI_API_KEY=...                # 從 https://aistudio.google.com 取得（試穿照）
 python3 -m outfit                        # 開 http://127.0.0.1:8000
 python3 -m outfit --host 0.0.0.0         # 讓同一個 Wi-Fi 的手機用 http://<電腦IP>:8000 開啟
 ```
@@ -147,3 +148,13 @@ python3 -m http.server -d outfit/standalone 8000
    胸寬／腰寬權重較高，偏緊比偏寬鬆扣分多（彈性布料除外），±1.5 cm 內算「剛好」。
 
 限制：只支援商品平量尺寸表；「適合胸圍 88–92」這類身體尺寸表會請使用者改找平量尺寸表。
+
+## 試穿（「👕 試穿」分頁）
+
+上傳全身照，用文字描述想穿的衣服或上傳最多 3 張商品照，由 Gemini 圖片模型把照片裡的人換上那套衣服。
+「👗 穿搭建議」的每套建議也有「👕 試穿這套」按鈕，會直接帶入照片和描述。
+
+- `outfit/tryon.py`：要求模型只換衣服，臉、身形、姿勢、背景保持不變。
+- 模型預設 `gemini-3.1-flash-image`，可用環境變數 `OUTFIT_TRYON_MODEL` 換成其他 Gemini 圖片模型。
+- 圖片生成需要 Gemini 付費方案；照片會傳到 Google。
+- 結果是示意圖：模型不知道衣服實際尺寸，會畫成剛好合身。買哪一號請看尺寸推薦。

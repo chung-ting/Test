@@ -53,7 +53,7 @@
   .look td:first-child { color: var(--muted); white-space: nowrap; width: 4.5em; }
   .why { color: var(--muted); font-size: .95rem; margin: 0; }
   .privacy { color: var(--muted); font-size: .85rem; text-align: center; }
-  .tabs { display: flex; gap: 4px; margin: 12px 0 16px; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0 16px; border-bottom: 1px solid var(--border); }
   .tabs button { border: 0; border-radius: 0; background: none; padding: 10px 14px; color: var(--muted);
                  border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
@@ -74,6 +74,13 @@
   .verdict.ok { color: var(--good); border-color: var(--good); }
   .verdict.off { color: var(--warn); border-color: var(--warn); }
   .chart-scroll { overflow-x: auto; }
+  .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .thumbs img { width: 72px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .compare figure { margin: 0; min-width: 0; }
+  .compare img { width: 100%; border-radius: 10px; display: block; }
+  .compare figcaption { color: var(--muted); font-size: .85rem; text-align: center; margin-top: 4px; }
+  .look .tryon-btn { margin-top: 8px; }
   .chart-table { border-collapse: collapse; font-size: .9rem; }
   .chart-table th, .chart-table td { padding: 4px; text-align: center; white-space: nowrap; }
   .chart-table input { width: 4.5em; margin: 0; padding: 4px 6px; }
@@ -96,6 +103,7 @@
     <button role="tab" data-tab="analyze" aria-selected="true">👗 穿搭建議</button>
     <button role="tab" data-tab="body" aria-selected="false">🧍 身體尺寸</button>
     <button role="tab" data-tab="size" aria-selected="false">📏 尺寸推薦</button>
+    <button role="tab" data-tab="tryon" aria-selected="false">👕 試穿</button>
   </nav>
 
   <div id="tab-analyze">
@@ -161,6 +169,35 @@
   <div id="body-status"></div>
   <div id="body-result"></div>
   <p class="privacy">照片只在這支手機上分析，不會上傳；只有輪廓座標會送到伺服器計算。</p>
+  </div>
+
+  <div id="tab-tryon" hidden>
+  <p class="sub">用你的照片產生「穿上這套」的示意照。看的是風格和顏色，合不合身請看尺寸推薦。</p>
+
+  <section class="card">
+    <h2>1. 你的全身照</h2>
+    <div class="row">
+      <label class="btn">📷 拍照<input id="tryon-camera" type="file" accept="image/*" capture="environment"></label>
+      <label class="btn">🖼️ 從相簿選<input id="tryon-gallery" type="file" accept="image/*"></label>
+    </div>
+    <img id="tryon-person" class="preview" alt="你的照片">
+  </section>
+
+  <section class="card">
+    <h2>2. 想穿什麼？</h2>
+    <p class="hint">用文字描述，或上傳衣服的商品照（最多 3 張），兩個都給效果最好。</p>
+    <textarea id="tryon-desc" rows="3" maxlength="500" placeholder="例如：白色牛津襯衫、深藍高腰直筒牛仔褲、白色帆布鞋"></textarea>
+    <div class="row" style="margin-top:12px">
+      <label class="btn">👚 上傳衣服照片<input id="tryon-garments" type="file" accept="image/*" multiple></label>
+      <button id="tryon-clear-garments" hidden>清除衣服照片</button>
+    </div>
+    <div id="tryon-garment-list" class="thumbs"></div>
+    <button class="btn-primary" id="tryon-submit" disabled>產生試穿照</button>
+  </section>
+
+  <div id="tryon-status"></div>
+  <div id="tryon-result"></div>
+  <p class="privacy">照片會傳送到 Google 的 Gemini 產生試穿照，本站不會儲存。</p>
   </div>
 
   <div id="tab-size" hidden>
@@ -288,14 +325,14 @@ function swatches(colors) {
 }
 
 // ---------- tabs ----------
-document.querySelectorAll("[role=tab]").forEach((tab) => {
-  tab.onclick = () => {
-    document.querySelectorAll("[role=tab]").forEach((t) => {
-      t.setAttribute("aria-selected", String(t === tab));
-      $("tab-" + t.dataset.tab).hidden = t !== tab;
-    });
-  };
-});
+function showTab(name) {
+  document.querySelectorAll("[role=tab]").forEach((t) => {
+    t.setAttribute("aria-selected", String(t.dataset.tab === name));
+    $("tab-" + t.dataset.tab).hidden = t.dataset.tab !== name;
+  });
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll("[role=tab]").forEach((tab) => { tab.onclick = () => showTab(tab.dataset.tab); });
 
 // ---------- size recommendation ----------
 const store = {
@@ -635,9 +672,85 @@ function render(d) {
       el("h3", {}, `穿搭建議 ${i + 1}：${s.title}`),
       el("table", {}, ...s.items.map((it) => el("tr", {}, el("td", {}, it.category), el("td", {}, `${it.item}（${it.color}）`)))),
       el("p", { class: "why" }, s.why),
+      tryOnButton(s),
     ));
   });
 }
+
+// ---------- try-on ----------
+const MAX_GARMENTS = 3;
+let tryonPerson = null;
+let tryonGarments = [];
+
+function tryOnButton(suggestion) {
+  const button = el("button", { class: "tryon-btn" }, "👕 試穿這套");
+  button.onclick = () => {
+    $("tryon-desc").value = `${suggestion.title}：` + suggestion.items.map((it) => `${it.color}${it.item}`).join("、");
+    if (imageData) setTryonPerson(imageData);
+    $("tryon-result").replaceChildren();
+    showTab("tryon");
+  };
+  return button;
+}
+function setTryonPerson(dataUrl) {
+  tryonPerson = dataUrl;
+  $("tryon-person").src = dataUrl;
+  $("tryon-person").style.display = "block";
+  updateTryonSubmit();
+}
+function updateTryonSubmit() {
+  $("tryon-submit").disabled = !(tryonPerson && ($("tryon-desc").value.trim() || tryonGarments.length));
+}
+function renderGarments() {
+  $("tryon-garment-list").replaceChildren(...tryonGarments.map((g) => el("img", { src: g, alt: "衣服照片" })));
+  $("tryon-clear-garments").hidden = !tryonGarments.length;
+  updateTryonSubmit();
+}
+for (const id of ["tryon-camera", "tryon-gallery"]) {
+  $(id).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try { setTryonPerson(await resize(file)); } catch (err) { tryonError(err.message); }
+  };
+}
+$("tryon-garments").onchange = async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  try {
+    for (const f of files) tryonGarments.push(await resize(f));
+    if (tryonGarments.length > MAX_GARMENTS) {
+      tryonGarments = tryonGarments.slice(0, MAX_GARMENTS);
+      tryonError(`衣服照片最多 ${MAX_GARMENTS} 張，只保留前 ${MAX_GARMENTS} 張。`);
+    }
+  } catch (err) { tryonError(err.message); }
+  renderGarments();
+};
+$("tryon-clear-garments").onclick = () => { tryonGarments = []; renderGarments(); };
+$("tryon-desc").oninput = updateTryonSubmit;
+function tryonError(msg) { $("tryon-status").replaceChildren(el("div", { class: "card error" }, msg)); }
+
+$("tryon-submit").onclick = async () => {
+  $("tryon-submit").disabled = true;
+  $("tryon-result").replaceChildren();
+  $("tryon-status").replaceChildren(el("div", { class: "card loading" }, el("div", { class: "spinner" }), "產生試穿照中，大約需要 20–60 秒…"));
+  try {
+    const data = await postJSON("/api/try-on", { image: tryonPerson, garments: tryonGarments, description: $("tryon-desc").value });
+    $("tryon-status").replaceChildren();
+    $("tryon-result").replaceChildren(el("section", { class: "card" },
+      el("h2", {}, "試穿結果"),
+      el("div", { class: "compare" },
+        el("figure", {}, el("img", { src: tryonPerson, alt: "原本的照片" }), el("figcaption", {}, "原本")),
+        el("figure", {}, el("img", { src: data.image, alt: "試穿示意照" }), el("figcaption", {}, "試穿示意"))),
+      el("p", { class: "hint", style: "margin-top:12px" }, "這是 AI 產生的示意圖，衣服會自動畫成合身的樣子。實際該買哪個尺寸，請用「📏 尺寸推薦」。長按圖片可以儲存。"),
+    ));
+    $("tryon-result").scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    tryonError(err.message);
+  } finally {
+    updateTryonSubmit();
+  }
+};
 </script>
 </body>
 </html>
