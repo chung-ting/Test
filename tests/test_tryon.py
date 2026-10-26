@@ -8,7 +8,8 @@ from google import genai
 from google.genai import types
 
 from outfit import AnalysisError
-from outfit.tryon import MODEL, build_contents, nearest_aspect_ratio, try_on
+from outfit.tryon import MODEL, build_contents, nearest_aspect_ratio
+from outfit.tryon import try_on_gemini as try_on
 
 PERSON = b"\xff\xd8person-jpeg"
 SHIRT = b"\x89PNGshirt"

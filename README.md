@@ -160,5 +160,9 @@ python3 -m http.server -d outfit/standalone 8000
   依頭肩關節點對齊後，用柔和邊緣把原圖的頭貼在新圖上。結果頁可以切換「保留原本的臉／AI 原圖」。
   構圖或姿勢被改太多時會略過並說明原因。也會把原圖的長寬比傳給 Gemini，讓構圖一致比較好對齊。
 - 模型預設 `gemini-3.1-flash-image`，可用環境變數 `OUTFIT_TRYON_MODEL` 換成其他 Gemini 圖片模型。
+- 也可以改用專門做試穿的 **Genlook API**（`outfit/genlook.py`）：設定 `GENLOOK_API_KEY`（到
+  platform.genlook.app 申請，註冊送 10 點）就會自動改用 Genlook；`OUTFIT_TRYON_PROVIDER=gemini|genlook`
+  可以強制指定。Genlook 需要衣服的商品照（每張一件，最多 4 件一起穿），每次 1 點（約 US$0.04）。
+  設 `GENLOOK_MOCK=1` 會用 Genlook 的免費測試模式，不扣點，回傳原照片，用來確認整個流程接得通。
 - 圖片生成需要 Gemini 付費方案；照片會傳到 Google。
 - 結果是示意圖：模型不知道衣服實際尺寸，會畫成剛好合身。買哪一號請看尺寸推薦。

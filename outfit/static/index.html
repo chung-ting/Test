@@ -186,7 +186,7 @@
 
   <section class="card">
     <h2>2. 想穿什麼？</h2>
-    <p class="hint">用文字描述，或上傳衣服的商品照（最多 3 張），兩個都給效果最好。</p>
+    <p class="hint" id="tryon-hint">用文字描述，或上傳衣服的商品照（每張一件衣服，最多 3 張），兩個都給效果最好。</p>
     <textarea id="tryon-desc" rows="3" maxlength="500" placeholder="例如：白色牛津襯衫、深藍高腰直筒牛仔褲、白色帆布鞋"></textarea>
     <div class="row" style="margin-top:12px">
       <label class="btn">👚 上傳衣服照片<input id="tryon-garments" type="file" accept="image/*" multiple></label>
@@ -198,7 +198,7 @@
 
   <div id="tryon-status"></div>
   <div id="tryon-result"></div>
-  <p class="privacy">照片會傳送到 Google 的 Gemini 產生試穿照，本站不會儲存。</p>
+  <p class="privacy" id="tryon-privacy">照片會傳送到 Google 的 Gemini 產生試穿照，本站不會儲存。</p>
   </div>
 
   <div id="tab-size" hidden>
@@ -680,7 +680,8 @@ function render(d) {
 }
 
 // ---------- try-on ----------
-const MAX_GARMENTS = 3;
+let MAX_GARMENTS = 3;
+let needsGarmentPhoto = false;
 let tryonPerson = null;
 let tryonAspect = null;
 let tryonGarments = [];
@@ -691,6 +692,9 @@ function tryOnButton(suggestion) {
     $("tryon-desc").value = `${suggestion.title}：` + suggestion.items.map((it) => `${it.color}${it.item}`).join("、");
     if (imageData) setTryonPerson(imageData);
     $("tryon-result").replaceChildren();
+    if (needsGarmentPhoto && !tryonGarments.length) {
+      tryonError("請再上傳這套衣服的商品照（每張一件），試穿需要衣服照片。");
+    }
     showTab("tryon");
   };
   return button;
@@ -705,8 +709,18 @@ function setTryonPerson(dataUrl) {
   updateTryonSubmit();
 }
 function updateTryonSubmit() {
-  $("tryon-submit").disabled = !(tryonPerson && ($("tryon-desc").value.trim() || tryonGarments.length));
+  const outfit = needsGarmentPhoto ? tryonGarments.length : $("tryon-desc").value.trim() || tryonGarments.length;
+  $("tryon-submit").disabled = !(tryonPerson && outfit);
 }
+fetch("/api/tryon-info").then((r) => r.json()).then((info) => {
+  MAX_GARMENTS = info.max_garments;
+  needsGarmentPhoto = info.needs_garment_photo;
+  if (info.provider === "genlook") {
+    $("tryon-hint").textContent = `上傳衣服的商品照（每張一件衣服，最多 ${MAX_GARMENTS} 件會一起穿上）。文字描述可以補充版型和長度，例如「寬鬆版、長度到臀部」。`;
+    $("tryon-privacy").textContent = "照片會傳送到 Genlook 產生試穿照，保留 1 天後刪除，本站不會儲存。";
+  }
+  updateTryonSubmit();
+});
 function renderGarments() {
   $("tryon-garment-list").replaceChildren(...tryonGarments.map((g) => el("img", { src: g, alt: "衣服照片" })));
   $("tryon-clear-garments").hidden = !tryonGarments.length;

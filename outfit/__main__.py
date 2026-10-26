@@ -14,6 +14,7 @@ from .analyze import OCCASIONS, analyze
 from .body import measure
 from .claude import AnalysisError
 from .sizing import MEASURES, extract_chart, recommend
+from .tryon import info as tryon_info
 from .tryon import try_on
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -57,6 +58,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, file.read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/api/occasions":
             self._json(200, OCCASIONS)
+        elif self.path == "/api/tryon-info":
+            self._json(200, tryon_info())
         elif self.path == "/api/measures":
             self._json(200, {cat: {k: {"label": m.label, "hint": m.hint} for k, m in ms.items()} for cat, ms in MEASURES.items()})
         else:

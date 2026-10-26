@@ -1,7 +1,8 @@
-"""Virtual try-on: ask a Gemini image model to dress the person in a photo in other clothes.
+"""Virtual try-on: dress the person in a photo in other clothes, with Genlook or a Gemini image model.
 
-The result is an illustration of the look, not a fit check: the model doesn't know the
-garment's real size. Use the size recommendation for that.
+OUTFIT_TRYON_PROVIDER picks the service ("genlook" or "gemini"); by default Genlook when
+GENLOOK_API_KEY is set, otherwise Gemini. Either way the result is an illustration of the look,
+not a fit check: the model doesn't know the garment's real size. Use the size recommendation for that.
 """
 
 import logging
@@ -11,6 +12,7 @@ import os
 from google import genai
 from google.genai import errors, types
 
+from . import genlook
 from .claude import MEDIA_TYPES, AnalysisError
 
 MODEL = os.environ.get("OUTFIT_TRYON_MODEL", "gemini-3.1-flash-image")
@@ -75,8 +77,29 @@ def parse_response(response) -> dict:
     raise AnalysisError("Gemini 沒有產生圖片，可能是安全規則擋下了。請換一張照片或改一下描述再試。")
 
 
+def provider() -> str:
+    chosen = os.environ.get("OUTFIT_TRYON_PROVIDER", "").lower()
+    if chosen in ("genlook", "gemini"):
+        return chosen
+    return "genlook" if os.environ.get("GENLOOK_API_KEY") else "gemini"
+
+
+def info() -> dict:
+    """What the page needs to know about the active service."""
+    if provider() == "genlook":
+        return {"provider": "genlook", "needs_garment_photo": True, "max_garments": genlook.MAX_PRODUCTS}
+    return {"provider": "gemini", "needs_garment_photo": False, "max_garments": MAX_GARMENTS}
+
+
 def try_on(person: bytes, media_type: str, garments: list[tuple[bytes, str]], description: str,
-           aspect: float | None = None, client=None) -> dict:
+           aspect: float | None = None) -> dict:
+    if provider() == "genlook":
+        return genlook.try_on(person, media_type, garments, description, aspect)
+    return try_on_gemini(person, media_type, garments, description, aspect)
+
+
+def try_on_gemini(person: bytes, media_type: str, garments: list[tuple[bytes, str]], description: str,
+                  aspect: float | None = None, client=None) -> dict:
     contents = build_contents(person, media_type, garments, description)
     image_config = None
     if isinstance(aspect, (int, float)) and not isinstance(aspect, bool) and 0.2 < aspect < 5:
