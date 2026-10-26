@@ -97,7 +97,14 @@
   .status { display: flex; align-items: center; gap: 10px; color: var(--muted); }
   .status .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
   .status .bar i { display: block; height: 100%; background: var(--tape); width: 0; transition: width .2s; }
-  .error { color: var(--danger); font-weight: 500; }
+  .error { color: var(--danger); font-weight: 500; margin: 0; }
+  #status { margin-top: 12px; }
+  #status .detail { color: var(--muted); font: 500 .75rem/1.4 var(--font-num); margin: 6px 0 0; word-break: break-word; }
+  .frame { position: relative; }
+  .frame .busy {
+    position: absolute; inset: auto 0 0 0; background: var(--ink); color: var(--paper);
+    font-size: .85rem; text-align: center; padding: 6px;
+  }
 
   .result-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
   .chip { font: 600 .75rem/1 var(--font-num); border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; padding: 4px 8px; }
@@ -171,10 +178,9 @@
         </div>
       </div>
     </div>
+    <div id="status" hidden></div>
     <button class="primary" id="compute" disabled>計算身體尺寸</button>
   </section>
-
-  <div id="status" hidden></div>
 
   <section id="result" aria-live="polite"></section>
 
@@ -232,12 +238,42 @@ function el(tag, attrs = {}, ...children) {
 function showProgress(text, fraction = null) {
   const bar = el("div", { class: "bar" }, el("i"));
   if (fraction !== null) bar.firstChild.style.width = `${Math.round(fraction * 100)}%`;
-  $("status").replaceChildren(el("section", { class: "status" }, el("span", {}, text), bar));
+  $("status").replaceChildren(el("div", { class: "status" }, el("span", {}, text), bar));
   $("status").hidden = false;
 }
-function showError(text) {
-  $("status").replaceChildren(el("section", {}, el("p", { class: "error", style: "margin:0" }, text)));
+function showError(text, detail = "") {
+  $("status").replaceChildren(el("p", { class: "error" }, text), detail ? el("p", { class: "detail" }, detail) : null);
   $("status").hidden = false;
+}
+
+// A failure while loading the detector, tagged with the step it happened in.
+class StageError extends Error {
+  constructor(stage, cause) {
+    super(`${stage}：${cause && cause.message || cause}`);
+    this.stage = stage;
+  }
+}
+function step(stage, promise, seconds) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`超過 ${seconds} 秒沒有完成`)), seconds * 1000); });
+  return Promise.race([promise, timeout]).catch((e) => { throw new StageError(stage, e); }).finally(() => clearTimeout(timer));
+}
+function loadClassicScript(src) {
+  return new Promise((resolve, reject) => {
+    const tag = el("script", { src });
+    tag.onload = resolve;
+    tag.onerror = () => reject(new Error(`無法載入 ${src}`));
+    document.head.append(tag);
+  });
+}
+async function loadVision() {
+  try {
+    return await import(new URL("vision_bundle.mjs", document.baseURI).href);
+  } catch (moduleError) {
+    await loadClassicScript("vision_bundle.js");
+    if (!self.MediaPipeVision) throw moduleError;
+    return self.MediaPipeVision;
+  }
 }
 function clearStatus() { $("status").hidden = true; }
 
@@ -273,10 +309,12 @@ function decodeBase64(bytes) {
 function getLandmarker() {
   if (!landmarkerPromise) {
     landmarkerPromise = (async () => {
-      const { PoseLandmarker } = await import(new URL("vision_bundle.mjs", document.baseURI).href);
-      const model = decodeBase64(await fetchWithProgress("pose_landmarker_full.b64.txt",
-        (p) => showProgress("下載人體偵測模型（第一次約 22 MB）", p * 0.9)));
-      showProgress("準備人體偵測…", 0.95);
+      showProgress("載入人體偵測程式…", 0.02);
+      const { PoseLandmarker } = await step("載入程式", loadVision(), 60);
+      await step("WebAssembly 檢查", WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])), 10);
+      const model = decodeBase64(await step("下載模型", fetchWithProgress("pose_landmarker_full.b64.txt",
+        (p) => showProgress("下載人體偵測模型（第一次約 22 MB）", 0.05 + p * 0.85)), 300));
+      showProgress("啟動人體偵測…", 0.95);
       const fileset = {
         wasmLoaderPath: new URL("wasm/vision_wasm_internal.js", document.baseURI).href,
         wasmBinaryPath: new URL("wasm/vision_wasm_internal.wasm", document.baseURI).href,
@@ -285,8 +323,12 @@ function getLandmarker() {
         baseOptions: { modelAssetBuffer: model, delegate },
         runningMode: "IMAGE", numPoses: 1, outputSegmentationMasks: true,
       });
-      try { return await PoseLandmarker.createFromOptions(fileset, options("GPU")); }
-      catch { return await PoseLandmarker.createFromOptions(fileset, options("CPU")); }
+      try {
+        return await step("啟動偵測（GPU）", PoseLandmarker.createFromOptions(fileset, options("GPU")), 30);
+      } catch {
+        showProgress("改用 CPU 啟動人體偵測…", 0.97);
+        return await step("啟動偵測（CPU）", PoseLandmarker.createFromOptions(fileset, options("CPU")), 90);
+      }
     })();
     landmarkerPromise.catch(() => { landmarkerPromise = null; });
   }
@@ -345,10 +387,20 @@ function personRuns(mask, w, h, seedX, seedY) {
   return { rows, keep };
 }
 
-async function scanPhoto(file) {
+function showPending(which, canvas) {
+  const preview = document.createElement("canvas");
+  preview.width = canvas.width;
+  preview.height = canvas.height;
+  preview.getContext("2d").drawImage(canvas, 0, 0);
+  $(which + "-frame").replaceChildren(preview, el("div", { class: "busy" }, "分析中…"));
+}
+
+async function scanPhoto(which, file) {
   const canvas = await loadCanvas(file);
+  showPending(which, canvas);
   const landmarker = await getLandmarker();
   showProgress("分析照片中…", 1);
+  await new Promise((r) => setTimeout(r, 50)); // let the message paint before the blocking detect call
   const result = landmarker.detect(canvas);
   const mask = result.segmentationMasks?.[0];
   try {
@@ -408,14 +460,17 @@ for (const which of ["front", "side"]) {
       if (!file) return;
       showProgress(landmarkerPromise ? "分析照片中…" : "載入人體偵測…", 0);
       try {
-        photos[which] = await scanPhoto(file);
+        photos[which] = await scanPhoto(which, file);
         drawPhoto(which);
         clearStatus();
       } catch (err) {
         photos[which] = null;
-        const msg = String(err && err.message || err);
-        showError(/fetch|import|network|wasm|download|Failed to/i.test(msg)
-          ? "人體偵測模型載入失敗，請確認網路後重新選照片" : msg);
+        $(which + "-frame").querySelector(".busy")?.remove();
+        if (err instanceof StageError) {
+          showError("人體偵測載入失敗，請截圖這段訊息給開發者，或稍後重新選照片。", `${err.message} · ${navigator.userAgent}`);
+        } else {
+          showError(String(err && err.message || err));
+        }
       }
       updateComputeButton();
     });
