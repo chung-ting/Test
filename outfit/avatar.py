@@ -3,6 +3,9 @@
 The avatar is a picture rendered to look 3D, not a 3D model. Every outfit change redraws it with
 the saved avatar as the reference, in the same fixed pose, so it stays recognisable.
 
+The default 2D style is returned as a transparent PNG (the model paints a flat key color, rembg's
+isnet-anime model cuts the character out). An optional style reference image steers its look.
+
 Images come from Qwen-Image-Edit on its free Hugging Face Space when HF_TOKEN is set (shared,
 queued, daily quota), otherwise from Gemini; OUTFIT_AVATAR_PROVIDER=qwen|flux|gemini overrides.
 FLUX.1 Kontext takes a single image, so with "flux" dressing an avatar in garment photos uses Gemini.
@@ -35,8 +38,12 @@ QWEN_SIZE = (832, 1248)  # width, height: 2:3, multiples of 16
 QWEN_MAX_IMAGES = 3      # the model is trained on one to three input images
 
 # Styles chosen for broad appeal with women worldwide, modelled on what dress-up and life-sim games,
-# avatar apps and collectible figures look like. "game" comes first: real proportions show clothes best.
+# avatar apps, animated films and collectible figures look like. "film2d" is the default: it keeps the
+# person's look best, shows clothes with real proportions, and comes out on a transparent background.
 STYLES = {
+    "film2d": ("2D 動畫電影風", "a hand-drawn 2D animated character in a classic 2D animated-film aesthetic: clean "
+               "contour lines, expressive eyes, simplified facial features, flat colors and subtle cel shading, "
+               "with no 3D rendering, photorealistic textures or chibi proportions"),
     "game": ("3D 遊戲風", "a polished stylized 3D game character render, like the character models of a modern "
              "cozy life-simulation or open-world game (not a photograph): smooth slightly simplified CG skin, "
              "softly sculpted faces with clean shapes, gently enlarged clear eyes, glossy stylized hair clumps, "
@@ -49,8 +56,9 @@ STYLES = {
                 "proportions, large bright expressive eyes, soft glossy hair, luminous skin, gentle pastel studio "
                 "lighting, and highly detailed fabric so the outfit is the star"),
 }
-# Ready-made looks to try right after taking a photo, all in the "game" style. Each outfit names
-# options for different people, and the model picks what suits whoever is in the photo.
+# Ready-made looks to try right after taking a photo, drawn in the "film2d" style on a transparent
+# background, so only the outfit changes (the scene is kept for the page to show behind the character).
+# Each outfit names options for different people, and the model picks what suits whoever is in the photo.
 TEMPLATES = {
     "city": ("城市街拍", "🏙️", "a trendy street-style outfit: an oversized blazer or bomber jacket over a fitted top, "
              "straight-leg jeans and clean white sneakers, a small crossbody bag",
@@ -79,6 +87,10 @@ FULL_BODY = ("Show everyone completely, from the top of the head down to the sho
              "facing the camera with arms relaxed, with a little empty space above the head and below the feet; "
              "extend any body parts the photo leaves out naturally. No text, logos, frames or packaging.")
 ASPECT = 2 / 3
+# Styles delivered as transparent PNGs: the model paints a flat key color (it can't output alpha),
+# then a background-removal model trained on illustrations cuts the character out.
+TRANSPARENT_STYLES = {"film2d"}
+KEY_COLOR = (158, 230, 184)  # #9EE6B8, far from skin, hair and most garment colors
 MAX_GARMENTS = 4
 
 
@@ -123,15 +135,89 @@ def frame_for_full_body(photo: bytes, media_type: str) -> tuple[bytes, str]:
     return out.getvalue(), "image/jpeg"
 
 
-def style_prompt(style: str) -> str:
+# Prompts here avoid naming example features or accessories ("such as glasses"): image models tend
+# to draw whatever a prompt names, even when it says to keep or avoid it.
+def film2d_prompt(outfit: str | None = None, has_reference: bool = False) -> str:
+    """The 2D animated-film prompt; Image 2, when given, is only a style reference."""
+    reference = ", using Image 2 only as a reference for the illustration style" if has_reference else ""
+    if outfit:
+        clothing = (f"Dress the person in {outfit}, choosing what suits them, and keep any accessories they "
+                    "already wear. Preserve the original pose and expression.")
+    else:
+        clothing = ("Keep the original outfit and accessories unchanged, including garment shapes, colors, "
+                    "patterns, fit, bags, glasses and jewelry. Preserve the original pose and expression.")
+    if has_reference:
+        clothing += " Do not copy the outfit or identity from Image 2."
+    return (f"Transform the person in Image 1 into a full-body, hand-drawn 2D animated character{reference}.\n\n"
+            "STYLE:\nClassic 2D animated-film aesthetic, clean contour lines, expressive eyes, simplified facial "
+            "features, flat colors, and subtle cel shading. No 3D rendering, photorealistic textures, or chibi "
+            "proportions.\n\n"
+            "IDENTITY:\nPreserve the person's recognizable facial features, face shape, skin tone, hairstyle, hair "
+            "color, smile, and distinctive details. Keep their apparent age and natural body proportions. Do not "
+            "replace their face with a generic cartoon face. Copy the hair color and the skin color from Image 1 "
+            "exactly, at the same lightness; black hair stays black. Draw only features and accessories that are "
+            "visible in Image 1.\n\n"
+            f"CLOTHING AND POSE:\n{clothing}\n\n"
+            "FRAMING:\nShow the entire person from head to toe, with space around the hair, hands, accessories, "
+            "and feet. If the original photo crops the lower legs, naturally extend the existing clothing and add "
+            "simple shoes that match the outfit.\n\n"
+            "BACKGROUND:\nA completely flat, solid mint-green background (#9EE6B8) with nothing else in it: no "
+            "shadow, glow, halo, text, watermark, or border.")
+
+
+def style_prompt(style: str, has_reference: bool = False) -> str:
+    if style == "film2d":
+        return film2d_prompt(None, has_reference)
     return (f"Redraw the person or people in this picture as {STYLES[style][1]}. {LIKENESS} Keep the clothes they "
             f"are wearing, with the same colors. {FULL_BODY} Plain soft pastel background.")
 
 
-def template_prompt(template: str) -> str:
-    _, _, outfit, scene = TEMPLATES[template]
-    return (f"Redraw the person or people in this picture as {STYLES['game'][1]}. {LIKENESS} Dress them in "
-            f"{outfit}, choosing what suits each person. {FULL_BODY} Background: {scene}.")
+def template_prompt(template: str, has_reference: bool = False) -> str:
+    return film2d_prompt(TEMPLATES[template][2], has_reference)
+
+
+def remove_background(result: dict) -> dict:
+    """Cut the character out of a flat key-color background; returns a transparent PNG.
+
+    Leaves the result unchanged when it isn't a readable image or rembg isn't installed.
+    """
+    try:
+        from PIL import Image, UnidentifiedImageError
+        from rembg import new_session, remove
+    except ImportError:
+        log.warning("rembg is not installed; keeping the background")
+        return result
+    try:
+        img = Image.open(io.BytesIO(result["image"])).convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        return result
+    global _rembg_session
+    if _rembg_session is None:
+        _rembg_session = new_session("isnet-anime")
+    out = io.BytesIO()
+    remove(img, session=_rembg_session, post_process_mask=True).save(out, "PNG")
+    return {**result, "image": out.getvalue(), "media_type": "image/png"}
+
+
+_rembg_session = None
+
+
+def on_key_color(image: bytes, media_type: str) -> tuple[bytes, str]:
+    """Flatten a transparent avatar onto the key color, so the model sees the background it should keep."""
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        img = Image.open(io.BytesIO(image))
+    except (UnidentifiedImageError, OSError):
+        return image, media_type
+    if img.mode not in ("RGBA", "LA", "P"):
+        return image, media_type
+    img = img.convert("RGBA")
+    flat = Image.new("RGB", img.size, KEY_COLOR)
+    flat.paste(img, (0, 0), img)
+    out = io.BytesIO()
+    flat.save(out, "PNG")
+    return out.getvalue(), "image/png"
 
 
 def _space(space: str, images: list[tuple[bytes, str]], prompt: str) -> dict:
@@ -167,27 +253,44 @@ def _space(space: str, images: list[tuple[bytes, str]], prompt: str) -> dict:
     return {"image": path.read_bytes(), "media_type": mimetypes.guess_type(path.name)[0] or "image/webp", "note": ""}
 
 
-def render(photo: bytes, media_type: str, prompt: str, client=None) -> dict:
-    if media_type not in MEDIA_TYPES:
-        raise AnalysisError("不支援的圖片格式")
-    photo, media_type = frame_for_full_body(photo, media_type)
+def _generate(images: list[tuple[bytes, str]], prompt: str, client=None) -> dict:
     if provider() == "qwen":
-        return _space(QWEN_SPACE, [(photo, media_type)], prompt)
+        return _space(QWEN_SPACE, images[:QWEN_MAX_IMAGES], prompt)
     if provider() == "flux":
-        return _space(FLUX_SPACE, [(photo, media_type)], prompt)
-    return generate_image([prompt, types.Part.from_bytes(data=photo, mime_type=media_type)], ASPECT, client)
+        return _space(FLUX_SPACE, images[:1], prompt)  # FLUX.1 Kontext reads a single image
+    parts = [prompt, *(types.Part.from_bytes(data=d, mime_type=mt) for d, mt in images)]
+    return generate_image(parts, ASPECT, client)
 
 
-def create_avatar(photo: bytes, media_type: str, style: str, client=None) -> dict:
+def render(photo: bytes, media_type: str, prompt: str, client=None,
+           style_ref: tuple[bytes, str] | None = None, transparent: bool = False) -> dict:
+    if media_type not in MEDIA_TYPES or (style_ref and style_ref[1] not in MEDIA_TYPES):
+        raise AnalysisError("不支援的圖片格式")
+    images = [frame_for_full_body(photo, media_type), *([style_ref] if style_ref else [])]
+    result = _generate(images, prompt, client)
+    return remove_background(result) if transparent else result
+
+
+def _use_reference(style_ref) -> bool:
+    return bool(style_ref) and provider() != "flux"
+
+
+def create_avatar(photo: bytes, media_type: str, style: str, client=None,
+                  style_ref: tuple[bytes, str] | None = None) -> dict:
     if style not in STYLES:
         raise AnalysisError(f"未知的風格：{style}")
-    return render(photo, media_type, style_prompt(style), client)
+    has_ref = style == "film2d" and _use_reference(style_ref)
+    return render(photo, media_type, style_prompt(style, has_ref), client, style_ref if has_ref else None,
+                  transparent=style in TRANSPARENT_STYLES)
 
 
-def try_template(photo: bytes, media_type: str, template: str, client=None) -> dict:
+def try_template(photo: bytes, media_type: str, template: str, client=None,
+                 style_ref: tuple[bytes, str] | None = None) -> dict:
     if template not in TEMPLATES:
         raise AnalysisError(f"未知的模板：{template}")
-    return render(photo, media_type, template_prompt(template), client)
+    has_ref = _use_reference(style_ref)
+    return render(photo, media_type, template_prompt(template, has_ref), client, style_ref if has_ref else None,
+                  transparent=True)
 
 
 def dress_avatar(avatar: bytes, avatar_type: str, style: str, garments: list[tuple[bytes, str]],
@@ -200,7 +303,10 @@ def dress_avatar(avatar: bytes, avatar_type: str, style: str, garments: list[tup
         raise AnalysisError(f"一次最多 {limit} 件。")
     if any(mt not in MEDIA_TYPES for _, mt in [(avatar, avatar_type), *garments]):
         raise AnalysisError("不支援的圖片格式")
-    prompt = (f"The first image is a character drawn as {STYLES.get(style, STYLES['game'])[1]}. Redraw exactly "
+    transparent = style in TRANSPARENT_STYLES
+    if transparent:
+        avatar, avatar_type = on_key_color(avatar, avatar_type)
+    prompt = (f"The first image is a character drawn as {STYLES.get(style, STYLES['film2d'])[1]}. Redraw exactly "
               "the same character, same face, hair, body, art style, pose, framing and background, but wearing "
               "the outfit below. Translate each garment into the character's art style while keeping its "
               "colors, patterns and details. Replace only the items given; keep the rest of the current outfit. "
@@ -209,11 +315,10 @@ def dress_avatar(avatar: bytes, avatar_type: str, style: str, garments: list[tup
         prompt += f"\n\nThe other {len(garments)} image(s) are photos of the garments, one item each."
     if description:
         prompt += f"\n\nOutfit: {description}"
-    images = [(avatar, avatar_type), *garments]
-    if provider() == "qwen":
-        return _space(QWEN_SPACE, images, prompt)
-    parts = [prompt, *(types.Part.from_bytes(data=d, mime_type=mt) for d, mt in images)]
-    return generate_image(parts, ASPECT, client)
+    if transparent:
+        prompt += "\n\nKeep the completely flat, solid mint-green background (#9EE6B8)."
+    result = _generate([(avatar, avatar_type), *garments], prompt, client)
+    return remove_background(result) if transparent else result
 
 
 def save_avatar(image: bytes, media_type: str, style: str) -> None:

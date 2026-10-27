@@ -92,6 +92,13 @@
   .template-grid button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
   .template-grid button:disabled { opacity: .5; cursor: default; }
   #template-result img { width: 100%; border-radius: 12px; display: block; margin-top: 12px; }
+  /* Transparent avatars sit on a soft checkerboard so the cut-out edges are visible. */
+  #template-result img, #avatar-options img, #my-avatar, #dressed-avatar {
+    background: repeating-conic-gradient(var(--border) 0% 25%, var(--card) 0% 50%) 50% / 20px 20px;
+  }
+  .style-ref { margin-top: 12px; }
+  .style-ref summary { cursor: pointer; font-weight: 600; }
+  .thumb { width: 96px; border-radius: 8px; margin-top: 8px; display: block; }
   #template-result .row { margin-top: 8px; }
   .chart-table { border-collapse: collapse; font-size: .9rem; }
   .chart-table th, .chart-table td { padding: 4px; text-align: center; white-space: nowrap; }
@@ -172,19 +179,28 @@
       <label class="btn">🖼️ 從相簿選<input id="avatar-gallery" type="file" accept="image/*"></label>
     </div>
     <img id="avatar-photo" class="preview" alt="你的照片">
+    <details class="style-ref">
+      <summary>畫風參考圖（選填）</summary>
+      <p class="hint">放一張你喜歡的插畫當參考，分身會照它的畫風畫；只參考畫風，不會照抄衣服或長相。</p>
+      <div class="row">
+        <label class="btn">🎨 選參考圖<input id="style-ref-input" type="file" accept="image/*"></label>
+        <button id="style-ref-clear" hidden>移除參考圖</button>
+      </div>
+      <img id="style-ref-preview" class="thumb" alt="畫風參考圖" hidden>
+    </details>
   </section>
 
   <section class="card">
     <h2>2. 選一個模板試看</h2>
-    <p class="hint">3D 遊戲風分身，換上模板的穿搭和場景。點一個，大約 30 秒出一張。</p>
+    <p class="hint">2D 動畫風分身換上模板的穿搭，背景是透明的。點一個，大約 1 分鐘出一張。</p>
     <div class="template-grid" id="template-list"></div>
     <div id="template-result"></div>
   </section>
 
   <section class="card">
-    <h2>3. 或比較三種畫風</h2>
-    <p class="hint">保留照片裡的衣服，三種畫風各產生一張，總共大約 1–2 分鐘。</p>
-    <button class="btn-primary" id="avatar-submit" disabled>產生三種畫風</button>
+    <h2>3. 或比較不同畫風</h2>
+    <p class="hint">保留照片裡的衣服，每種畫風各產生一張，總共大約 2–4 分鐘。</p>
+    <button class="btn-primary" id="avatar-submit" disabled>產生所有畫風</button>
   </section>
 
   <div id="avatar-status"></div>
@@ -758,6 +774,23 @@ function showMyAvatar(mine) {
   $("avatar-make-title").textContent = "重新做一個分身";
 }
 let templateBusy = false;
+let styleRef = null;
+$("style-ref-input").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    styleRef = await resize(file);
+    $("style-ref-preview").src = styleRef;
+    $("style-ref-preview").hidden = false;
+    $("style-ref-clear").hidden = false;
+  } catch (err) { avatarError("avatar-status", err.message); }
+};
+$("style-ref-clear").onclick = () => {
+  styleRef = null;
+  $("style-ref-preview").hidden = true;
+  $("style-ref-clear").hidden = true;
+};
 function renderTemplates(templates) {
   $("template-list").replaceChildren(...Object.entries(templates).map(([key, t]) => {
     const b = el("button", { "data-template": key, "aria-pressed": "false" }, el("span", {}, t.icon), t.label);
@@ -775,12 +808,12 @@ async function tryTemplate(key, label, button) {
   document.querySelectorAll("#template-list button").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
   $("template-result").replaceChildren(loading(`正在產生「${label}」…大約 30 秒`));
   try {
-    const { image } = await postJSON("/api/avatar/template", { image: avatarPhoto, template: key });
+    const { image } = await postJSON("/api/avatar/template", { image: avatarPhoto, template: key, style_ref: styleRef });
     const keep = el("button", {}, "用這個當我的分身");
     keep.onclick = async () => {
       try {
-        await postJSON("/api/avatar/save", { image, style: "game" });
-        showMyAvatar({ image, style: "game" });
+        await postJSON("/api/avatar/save", { image, style: "film2d" });
+        showMyAvatar({ image, style: "film2d" });
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (err) { avatarError("template-result", err.message); }
     };
@@ -826,7 +859,7 @@ $("avatar-submit").onclick = async () => {
   $("avatar-options").replaceChildren(...cards.map((c) => c[3]));
   await Promise.all(cards.map(async ([style, label, body]) => {
     try {
-      const { image } = await postJSON("/api/avatar/preview", { image: avatarPhoto, style });
+      const { image } = await postJSON("/api/avatar/preview", { image: avatarPhoto, style, style_ref: styleRef });
       const choose = el("button", {}, "用這個當我的分身");
       choose.onclick = async () => {
         try {

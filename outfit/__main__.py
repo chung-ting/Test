@@ -38,6 +38,11 @@ def data_url(data: bytes, media_type: str) -> str:
     return f"data:{media_type};base64,{base64.b64encode(data).decode()}"
 
 
+def style_reference(body: dict) -> tuple[bytes, str] | None:
+    """The optional illustration-style reference image sent with avatar requests."""
+    return decode_data_url(body["style_ref"]) if body.get("style_ref") else None
+
+
 class Handler(BaseHTTPRequestHandler):
     analyzer = staticmethod(analyze)
     chart_reader = staticmethod(extract_chart)
@@ -100,11 +105,13 @@ class Handler(BaseHTTPRequestHandler):
         return {"image": data_url(result["image"], result["media_type"]), "note": result["note"]}
 
     def _avatar_preview(self, body: dict) -> dict:
-        result = self.avatar_maker(*decode_data_url(body.get("image", "")), body.get("style", ""))
+        result = self.avatar_maker(*decode_data_url(body.get("image", "")), body.get("style", ""),
+                                   style_ref=style_reference(body))
         return {"image": data_url(result["image"], result["media_type"])}
 
     def _avatar_template(self, body: dict) -> dict:
-        result = self.template_maker(*decode_data_url(body.get("image", "")), body.get("template", ""))
+        result = self.template_maker(*decode_data_url(body.get("image", "")), body.get("template", ""),
+                                     style_ref=style_reference(body))
         return {"image": data_url(result["image"], result["media_type"])}
 
     def _avatar_save(self, body: dict) -> dict:
