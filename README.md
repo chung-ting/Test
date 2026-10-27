@@ -190,3 +190,9 @@ python3 -m http.server -d outfit/standalone 8000
 `python3 -m outfit.demo.build_demo outfit-demo.html` 會把真正的網頁加上 `outfit/demo/demo_backend.js`，
 在瀏覽器裡用範例資料回應所有 API，產生一個不需要伺服器的單一頁面，可以發布成連結在手機上看畫面和流程。
 AI 結果都是標示「示範」的範例；身體尺寸分頁改成連到「照片量身」單機版。
+
+## 3D 分身（實驗）
+
+流程：Qwen-Image-Edit 把分身畫成全身 A 字站姿 → TRELLIS.2（Hugging Face 免費 Demo）轉成 GLB 3D 模型 →
+`python3 -m outfit.demo.build_viewer 模型.glb 分身.html` 產生單一網頁，手機上可以旋轉、縮放；
+模型綁好骨架、帶有動作後，同一個網頁會自動出現切換動作的按鈕。
