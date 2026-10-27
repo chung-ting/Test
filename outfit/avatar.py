@@ -145,7 +145,7 @@ def film2d_prompt(outfit: str | None = None, has_reference: bool = False) -> str
                     "already wear. Preserve the original pose and expression.")
     else:
         clothing = ("Keep the original outfit and accessories unchanged, including garment shapes, colors, "
-                    "patterns, fit, bags, glasses and jewelry. Preserve the original pose and expression.")
+                    "patterns, fit and any accessories. Preserve the original pose and expression.")
     if has_reference:
         clothing += " Do not copy the outfit or identity from Image 2."
     return (f"Transform the person in Image 1 into a full-body, hand-drawn 2D animated character{reference}.\n\n"
