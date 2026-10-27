@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from ..analyze import OCCASIONS
-from ..avatar import STYLES
+from ..avatar import STYLES, TEMPLATES
 from ..sizing import MEASURES
 
 HERE = Path(__file__).resolve().parent
@@ -55,6 +55,7 @@ def build(page: str) -> str:
         "occasions": OCCASIONS,
         "measures": {cat: {k: {"label": m.label, "hint": m.hint} for k, m in ms.items()} for cat, ms in MEASURES.items()},
         "styles": {k: label for k, (label, _) in STYLES.items()},
+        "templates": {k: {"label": label, "icon": icon} for k, (label, icon, _, _) in TEMPLATES.items()},
     }
     backend = (HERE / "demo_backend.js").read_text()
     page = page.replace('<script src="/static/keepface.js"></script>',

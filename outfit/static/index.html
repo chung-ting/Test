@@ -86,6 +86,13 @@
   .style-grid .card { margin: 0; display: flex; flex-direction: column; gap: 8px; }
   .style-grid img { width: 100%; border-radius: 10px; display: block; background: var(--bg); }
   .style-grid h3 { margin: 0; font-size: 1rem; }
+  .template-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .template-grid button { border-radius: 14px; padding: 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .template-grid button span { font-size: 1.6rem; line-height: 1; }
+  .template-grid button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .template-grid button:disabled { opacity: .5; cursor: default; }
+  #template-result img { width: 100%; border-radius: 12px; display: block; margin-top: 12px; }
+  #template-result .row { margin-top: 8px; }
   .chart-table { border-collapse: collapse; font-size: .9rem; }
   .chart-table th, .chart-table td { padding: 4px; text-align: center; white-space: nowrap; }
   .chart-table input { width: 4.5em; margin: 0; padding: 4px 6px; }
@@ -159,19 +166,30 @@
 
   <section class="card">
     <h2 id="avatar-make-title">1. 拍一張全身照</h2>
-    <p class="hint">正面、全身入鏡、光線充足效果最好。會用目前穿的衣服當分身的第一套衣服。</p>
+    <p class="hint">正面、全身入鏡、光線充足效果最好；半身或自拍也可以，AI 會補畫全身，但臉會比較不像。</p>
     <div class="row">
       <label class="btn">📷 拍照<input id="avatar-camera" type="file" accept="image/*" capture="environment"></label>
       <label class="btn">🖼️ 從相簿選<input id="avatar-gallery" type="file" accept="image/*"></label>
     </div>
     <img id="avatar-photo" class="preview" alt="你的照片">
-    <button class="btn-primary" id="avatar-submit" disabled>產生三種風格</button>
-    <p class="hint" style="margin-top:8px">三種風格會各產生一張，總共大約 30 秒、NT$3–6。</p>
+  </section>
+
+  <section class="card">
+    <h2>2. 選一個模板試看</h2>
+    <p class="hint">3D 遊戲風分身，換上模板的穿搭和場景。點一個，大約 30 秒出一張。</p>
+    <div class="template-grid" id="template-list"></div>
+    <div id="template-result"></div>
+  </section>
+
+  <section class="card">
+    <h2>3. 或比較三種畫風</h2>
+    <p class="hint">保留照片裡的衣服，三種畫風各產生一張，總共大約 1–2 分鐘。</p>
+    <button class="btn-primary" id="avatar-submit" disabled>產生三種畫風</button>
   </section>
 
   <div id="avatar-status"></div>
   <div id="avatar-options" class="style-grid"></div>
-  <p class="privacy">照片會傳送到 Google 的 Gemini 產生分身。選好的分身存在跑這個 App 的電腦裡。</p>
+  <p class="privacy">照片會傳送到 AI 服務（Hugging Face 上的 FLUX，或 Google Gemini）產生分身。選好的分身存在跑這個 App 的電腦裡。</p>
   </div>
 
   <div id="tab-body" hidden>
@@ -738,7 +756,46 @@ function showMyAvatar(mine) {
   $("dressed-figure").hidden = true;
   $("avatar-make-title").textContent = "重新做一個分身";
 }
-fetch("/api/avatar").then((r) => r.json()).then((d) => { avatarStyles = d.styles; showMyAvatar(d.avatar); });
+let templateBusy = false;
+function renderTemplates(templates) {
+  $("template-list").replaceChildren(...Object.entries(templates).map(([key, t]) => {
+    const b = el("button", { "data-template": key, "aria-pressed": "false" }, el("span", {}, t.icon), t.label);
+    b.disabled = !avatarPhoto;
+    b.onclick = () => tryTemplate(key, t.label, b);
+    return b;
+  }));
+}
+function syncTemplateButtons() {
+  document.querySelectorAll("#template-list button").forEach((b) => { b.disabled = !avatarPhoto || templateBusy; });
+}
+async function tryTemplate(key, label, button) {
+  templateBusy = true;
+  syncTemplateButtons();
+  document.querySelectorAll("#template-list button").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+  $("template-result").replaceChildren(loading(`正在產生「${label}」…大約 30 秒`));
+  try {
+    const { image } = await postJSON("/api/avatar/template", { image: avatarPhoto, template: key });
+    const keep = el("button", {}, "用這個當我的分身");
+    keep.onclick = async () => {
+      try {
+        await postJSON("/api/avatar/save", { image, style: "game" });
+        showMyAvatar({ image, style: "game" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch (err) { avatarError("template-result", err.message); }
+    };
+    $("template-result").replaceChildren(el("img", { src: image, alt: `${label}試看` }), el("div", { class: "row" }, keep));
+  } catch (err) {
+    $("template-result").replaceChildren(el("p", { class: "error" }, err.message));
+  } finally {
+    templateBusy = false;
+    syncTemplateButtons();
+  }
+}
+fetch("/api/avatar").then((r) => r.json()).then((d) => {
+  avatarStyles = d.styles;
+  renderTemplates(d.templates);
+  showMyAvatar(d.avatar);
+});
 
 for (const id of ["avatar-camera", "avatar-gallery"]) {
   $(id).onchange = async (e) => {
@@ -750,6 +807,8 @@ for (const id of ["avatar-camera", "avatar-gallery"]) {
       $("avatar-photo").src = avatarPhoto;
       $("avatar-photo").style.display = "block";
       $("avatar-submit").disabled = false;
+      $("template-result").replaceChildren();
+      syncTemplateButtons();
     } catch (err) { avatarError("avatar-status", err.message); }
   };
 }

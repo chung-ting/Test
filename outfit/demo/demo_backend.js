@@ -47,13 +47,14 @@
   }
 
   const STYLE_LOOK = {
+    game: { bg: ["#e6eefc", "#fde8ef"], head: 0.1, body: 0.55 },
     fashion: { bg: ["#fde2ea", "#e9e3ff"], head: 0.12, body: 0.5 },
     figure: { bg: ["#fff1d6", "#ffd9e4"], head: 0.2, body: 0.32 },
     animation: { bg: ["#dff3ff", "#fef3e2"], head: 0.14, body: 0.46 },
   };
 
   // A simple drawn character standing in for the generated avatar.
-  function demoAvatar(style, outfitColor = "#8fb3e8", garment = null) {
+  function demoAvatar(style, outfitColor = "#8fb3e8", garment = null, label = null) {
     const look = STYLE_LOOK[style] || STYLE_LOOK.fashion;
     const W = 480, H = 640;
     const c = document.createElement("canvas");
@@ -95,7 +96,7 @@
     ctx.fillStyle = "#ffffff"; // shoes
     ctx.fillRect(cx - W * 0.1, bodyTop + bodyH, W * 0.08, H * 0.03);
     ctx.fillRect(cx + W * 0.02, bodyTop + bodyH, W * 0.08, H * 0.03);
-    stamp(ctx, W, H, `示範｜${DATA.styles[style] || ""}`);
+    stamp(ctx, W, H, `示範｜${label || DATA.styles[style] || ""}`);
     return c.toDataURL("image/png");
   }
 
@@ -158,7 +159,13 @@
       case "/api/occasions": return json(DATA.occasions);
       case "/api/measures": return json(DATA.measures);
       case "/api/tryon-info": return json({ provider: "genlook", needs_garment_photo: true, max_garments: 4 });
-      case "/api/avatar": return json({ styles: DATA.styles, avatar: savedAvatar });
+      case "/api/avatar": return json({ styles: DATA.styles, templates: DATA.templates, avatar: savedAvatar });
+      case "/api/avatar/template": {
+        await wait(1500);
+        const t = DATA.templates[body.template] || {};
+        const colors = { city: "#c9b8a6", date: "#c2405a", office: "#3d4a63", resort: "#f2d58a", campus: "#7a8f5a", winter: "#8a6f5c" };
+        return json({ image: demoAvatar("game", colors[body.template], null, `${t.icon || ""} ${t.label || ""}`) });
+      }
       case "/api/analyze": await wait(1500); return json(ANALYSIS);
       case "/api/size-chart": await wait(1200); return json(CHART);
       case "/api/recommend-size": return json(...recommend(body.chart, body.reference));
@@ -168,7 +175,7 @@
       case "/api/avatar/dress": {
         await wait(1500);
         const garment = body.garments && body.garments[0] ? await load(body.garments[0]) : null;
-        return json({ image: demoAvatar(savedAvatar ? savedAvatar.style : "fashion", "#e8b4b8", garment) });
+        return json({ image: demoAvatar(savedAvatar ? savedAvatar.style : "game", "#e8b4b8", garment) });
       }
       default: return json({ error: "示範版沒有這個功能" }, 404);
     }

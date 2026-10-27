@@ -43,6 +43,7 @@ class Handler(BaseHTTPRequestHandler):
     chart_reader = staticmethod(extract_chart)
     dresser = staticmethod(try_on)
     avatar_maker = staticmethod(avatar.create_avatar)
+    template_maker = staticmethod(avatar.try_template)
     avatar_dresser = staticmethod(avatar.dress_avatar)
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -68,7 +69,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/avatar":
             saved = avatar.load_avatar()
             mine = saved and {"image": data_url(saved["image"], saved["media_type"]), "style": saved["style"]}
-            self._json(200, {"styles": {k: label for k, (label, _) in avatar.STYLES.items()}, "avatar": mine})
+            self._json(200, {"styles": {k: label for k, (label, _) in avatar.STYLES.items()},
+                             "templates": {k: {"label": label, "icon": icon}
+                                           for k, (label, icon, _, _) in avatar.TEMPLATES.items()},
+                             "avatar": mine})
         elif self.path == "/api/tryon-info":
             self._json(200, tryon_info())
         elif self.path == "/api/measures":
@@ -99,6 +103,10 @@ class Handler(BaseHTTPRequestHandler):
         result = self.avatar_maker(*decode_data_url(body.get("image", "")), body.get("style", ""))
         return {"image": data_url(result["image"], result["media_type"])}
 
+    def _avatar_template(self, body: dict) -> dict:
+        result = self.template_maker(*decode_data_url(body.get("image", "")), body.get("template", ""))
+        return {"image": data_url(result["image"], result["media_type"])}
+
     def _avatar_save(self, body: dict) -> dict:
         style = body.get("style", "")
         if style not in avatar.STYLES:
@@ -117,7 +125,8 @@ class Handler(BaseHTTPRequestHandler):
 
     ROUTES = {"/api/analyze": _analyze, "/api/size-chart": _size_chart, "/api/recommend-size": _recommend_size,
               "/api/body-measure": _body_measure, "/api/try-on": _try_on, "/api/avatar/preview": _avatar_preview,
-              "/api/avatar/save": _avatar_save, "/api/avatar/dress": _avatar_dress}
+              "/api/avatar/template": _avatar_template, "/api/avatar/save": _avatar_save,
+              "/api/avatar/dress": _avatar_dress}
 
     def do_POST(self):
         route = self.ROUTES.get(self.path)
