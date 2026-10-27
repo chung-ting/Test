@@ -124,13 +124,38 @@ class AvatarTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.TestCase):
-    def test_flux_when_a_hugging_face_token_is_set_unless_overridden(self):
-        cases = [({}, "gemini"), ({"HF_TOKEN": "hf_x"}, "flux"),
-                 ({"HF_TOKEN": "hf_x", "OUTFIT_AVATAR_PROVIDER": "gemini"}, "gemini"),
-                 ({"OUTFIT_AVATAR_PROVIDER": "FLUX"}, "flux")]
-        for env, expected in cases:
+    def test_qwen_when_a_hugging_face_token_is_set_unless_overridden(self):
+        cases = [({}, "gemini", 4), ({"HF_TOKEN": "hf_x"}, "qwen", 2),
+                 ({"HF_TOKEN": "hf_x", "OUTFIT_AVATAR_PROVIDER": "gemini"}, "gemini", 4),
+                 ({"OUTFIT_AVATAR_PROVIDER": "FLUX"}, "flux", 4)]
+        for env, expected, limit in cases:
             with self.subTest(env=env), mock.patch.dict(os.environ, env, clear=True):
-                self.assertEqual(avatar.provider(), expected)
+                self.assertEqual((avatar.provider(), avatar.dress_limit()), (expected, limit))
+
+    def space_result(self, tmp, gallery):
+        out = Path(tmp) / "image.webp"
+        out.write_bytes(b"RIFFspacewebp")
+        client = mock.MagicMock()
+        client.predict.return_value = ([{"image": {"path": str(out)}, "caption": None}] if gallery
+                                       else {"path": str(out)}, 42)
+        return client
+
+    def test_qwen_space_gets_every_image_and_our_prompt_as_is(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"OUTFIT_AVATAR_PROVIDER": "qwen", "HF_TOKEN": "hf_x"}), \
+                mock.patch("gradio_client.Client") as make:
+            client = make.return_value = self.space_result(tmp, gallery=True)
+            result = avatar.try_template(PHOTO, "image/jpeg", "campus")
+            self.assertEqual((result["image"], result["media_type"]), (b"RIFFspacewebp", "image/webp"))
+            self.assertEqual(make.call_args.args[0], avatar.QWEN_SPACE)
+            gallery, prompt, *rest = client.predict.call_args.args
+            self.assertEqual(len(gallery), 1)
+            self.assertIn("ginkgo", prompt)
+            self.assertEqual(rest[-3:], [1248, 832, False])  # height, width, no prompt rewriting
+            avatar.dress_avatar(b"avatar", "image/png", "game", [(SHOES, "image/png"), (SHOES, "image/png")], "")
+            self.assertEqual(len(client.predict.call_args.args[0]), 3)
+            with self.assertRaisesRegex(AnalysisError, "最多 2 件"):
+                avatar.dress_avatar(b"avatar", "image/png", "game", [(SHOES, "image/png")] * 3, "")
 
     def test_flux_space_results_and_quota_errors(self):
         from gradio_client.exceptions import AppError
@@ -147,7 +172,7 @@ class ProviderTests(unittest.TestCase):
                 self.assertEqual(make.call_args.kwargs["token"], "hf_x")
                 self.assertIn("street-style", client.predict.call_args.args[1])
                 client.predict.side_effect = AppError("You have exceeded your ZeroGPU quota")
-                with self.assertRaisesRegex(AnalysisError, "免費額度用完"):
+                with self.assertRaisesRegex(AnalysisError, "免費產圖次數用完"):
                     avatar.try_template(PHOTO, "image/jpeg", "city")
                 client.predict.side_effect = ConnectionError("down")
                 with self.assertRaisesRegex(AnalysisError, "連不上"):
@@ -185,6 +210,7 @@ class AvatarRouteTests(unittest.TestCase):
                 status, info = call("/api/avatar")
                 self.assertEqual((info["avatar"], list(info["styles"])[0]), (None, "game"))
                 self.assertEqual(info["templates"]["city"], {"label": "城市街拍", "icon": "🏙️"})
+                self.assertIn(info["max_garments"], (2, 4))
                 _, look = call("/api/avatar/template", {"image": url(PHOTO, "image/jpeg"), "template": "city"})
                 self.assertEqual(look["image"], url(b"city-look", "image/webp"))
                 self.assertIn("先產生", call("/api/avatar/dress", {"description": "鞋子"})[1]["error"])

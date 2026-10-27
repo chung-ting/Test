@@ -178,9 +178,10 @@ python3 -m http.server -d outfit/standalone 8000
 
 - `outfit/avatar.py`：模板和畫風都在這裡定義；每種都要求保留本人的身形、膚色、臉型和髮型，不修瘦、不美白。
 - 半身或自拍照會自動放到加高的畫布上，讓 AI 畫出全身（臉會比較不像，全身照效果最好）。
-- 產圖服務：設了 `HF_TOKEN` 就用 Hugging Face 上 FLUX.1 Kontext 的免費 Demo（要排隊、每天有次數上限，
-  用完會提示），否則用 Gemini（`GEMINI_API_KEY`）；`OUTFIT_AVATAR_PROVIDER=flux|gemini` 可以指定。
-  幫分身換上衣服照片需要同時看多張圖，只能用 Gemini。
+- 產圖服務：設了 `HF_TOKEN` 就用 Hugging Face 上 **Qwen-Image-Edit-2511** 的官方免費 Demo（要排隊、
+  每天有次數上限，用完會提示），否則用 Gemini（`GEMINI_API_KEY`）；`OUTFIT_AVATAR_PROVIDER=qwen|flux|gemini`
+  可以指定。Qwen 一次可以看 1–3 張圖，所以分身換裝一次最多 2 件衣服；FLUX.1 Kontext 只能看 1 張，
+  選 FLUX 時換裝改用 Gemini。
 - 選好的分身存在跑 App 的電腦：`~/.outfit/`（可用 `OUTFIT_DATA_DIR` 改位置）。
 - 不開網頁也能試：`python3 -m outfit.avatar 我的照片.jpg -o 輸出/ --template all`（或 `--style all`）。
 

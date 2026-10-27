@@ -153,7 +153,7 @@
       <figure id="dressed-figure" hidden><img id="dressed-avatar" alt="換裝後的分身"><figcaption>換裝後</figcaption></figure>
     </div>
     <h2 style="margin-top:16px">幫分身換裝</h2>
-    <p class="hint">上傳衣服或鞋子的照片（每張一件，最多 4 件），也可以用文字描述。</p>
+    <p class="hint" id="dress-hint">上傳衣服或鞋子的照片（每張一件，最多 4 件），也可以用文字描述。</p>
     <textarea id="dress-desc" rows="2" maxlength="300" placeholder="例如：換成白色帆布鞋"></textarea>
     <div class="row" style="margin-top:12px">
       <label class="btn">👚 上傳衣服照片<input id="dress-garments" type="file" accept="image/*" multiple></label>
@@ -189,7 +189,7 @@
 
   <div id="avatar-status"></div>
   <div id="avatar-options" class="style-grid"></div>
-  <p class="privacy">照片會傳送到 AI 服務（Hugging Face 上的 FLUX，或 Google Gemini）產生分身。選好的分身存在跑這個 App 的電腦裡。</p>
+  <p class="privacy">照片會傳送到 AI 服務（Hugging Face 上的 Qwen 或 FLUX，或 Google Gemini）產生分身。選好的分身存在跑這個 App 的電腦裡。</p>
   </div>
 
   <div id="tab-body" hidden>
@@ -744,6 +744,7 @@ function render(d) {
 let avatarPhoto = null;
 let avatarStyles = {};
 let dressGarments = [];
+let maxDressGarments = 4;
 
 function avatarError(where, msg) { $(where).replaceChildren(el("div", { class: "card error" }, msg)); }
 function loading(msg) { return el("div", { class: "card loading" }, el("div", { class: "spinner" }), msg); }
@@ -793,6 +794,8 @@ async function tryTemplate(key, label, button) {
 }
 fetch("/api/avatar").then((r) => r.json()).then((d) => {
   avatarStyles = d.styles;
+  maxDressGarments = d.max_garments || 4;
+  $("dress-hint").textContent = `上傳衣服或鞋子的照片（每張一件，最多 ${maxDressGarments} 件），也可以用文字描述。`;
   renderTemplates(d.templates);
   showMyAvatar(d.avatar);
 });
@@ -849,9 +852,9 @@ $("dress-garments").onchange = async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
   try { for (const f of files) dressGarments.push(await resize(f)); } catch (err) { avatarError("dress-status", err.message); }
-  if (dressGarments.length > 4) {
-    dressGarments = dressGarments.slice(0, 4);
-    avatarError("dress-status", "一次最多 4 件，只保留前 4 件。");
+  if (dressGarments.length > maxDressGarments) {
+    dressGarments = dressGarments.slice(0, maxDressGarments);
+    avatarError("dress-status", `一次最多 ${maxDressGarments} 件，只保留前 ${maxDressGarments} 件。`);
   }
   renderDressList();
 };

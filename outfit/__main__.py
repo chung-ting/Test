@@ -72,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"styles": {k: label for k, (label, _) in avatar.STYLES.items()},
                              "templates": {k: {"label": label, "icon": icon}
                                            for k, (label, icon, _, _) in avatar.TEMPLATES.items()},
-                             "avatar": mine})
+                             "max_garments": avatar.dress_limit(), "avatar": mine})
         elif self.path == "/api/tryon-info":
             self._json(200, tryon_info())
         elif self.path == "/api/measures":

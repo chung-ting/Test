@@ -3,9 +3,9 @@
 The avatar is a picture rendered to look 3D, not a 3D model. Every outfit change redraws it with
 the saved avatar as the reference, in the same fixed pose, so it stays recognisable.
 
-Images come from FLUX.1 Kontext on its free Hugging Face Space when HF_TOKEN is set (shared,
-queued, daily quota), otherwise from Gemini; OUTFIT_AVATAR_PROVIDER=flux|gemini overrides.
-Dressing an avatar in garment photos needs several input images, so it always uses Gemini.
+Images come from Qwen-Image-Edit on its free Hugging Face Space when HF_TOKEN is set (shared,
+queued, daily quota), otherwise from Gemini; OUTFIT_AVATAR_PROVIDER=qwen|flux|gemini overrides.
+FLUX.1 Kontext takes a single image, so with "flux" dressing an avatar in garment photos uses Gemini.
 
 Saved on this computer under OUTFIT_DATA_DIR (default ~/.outfit).
 
@@ -29,7 +29,10 @@ from .tryon import generate_image
 
 log = logging.getLogger("outfit")
 
+QWEN_SPACE = "Qwen/Qwen-Image-Edit-2511"
 FLUX_SPACE = "black-forest-labs/FLUX.1-Kontext-Dev"
+QWEN_SIZE = (832, 1248)  # width, height: 2:3, multiples of 16
+QWEN_MAX_IMAGES = 3      # the model is trained on one to three input images
 
 # Styles chosen for broad appeal with women worldwide, modelled on what dress-up and life-sim games,
 # avatar apps and collectible figures look like. "game" comes first: real proportions show clothes best.
@@ -85,9 +88,14 @@ def data_dir() -> Path:
 
 def provider() -> str:
     chosen = os.environ.get("OUTFIT_AVATAR_PROVIDER", "").lower()
-    if chosen in ("flux", "gemini"):
+    if chosen in ("qwen", "flux", "gemini"):
         return chosen
-    return "flux" if os.environ.get("HF_TOKEN") else "gemini"
+    return "qwen" if os.environ.get("HF_TOKEN") else "gemini"
+
+
+def dress_limit() -> int:
+    """How many garment photos one outfit change can take with the current provider."""
+    return QWEN_MAX_IMAGES - 1 if provider() == "qwen" else MAX_GARMENTS
 
 
 def frame_for_full_body(photo: bytes, media_type: str) -> tuple[bytes, str]:
@@ -126,25 +134,35 @@ def template_prompt(template: str) -> str:
             f"{outfit}, choosing what suits each person. {FULL_BODY} Background: {scene}.")
 
 
-def _flux(photo: bytes, media_type: str, prompt: str) -> dict:
+def _space(space: str, images: list[tuple[bytes, str]], prompt: str) -> dict:
+    """Run an image-editing demo Space on Hugging Face; both take image file(s) plus a prompt."""
     from gradio_client import Client, handle_file
     from gradio_client.exceptions import AppError
 
-    suffix = mimetypes.guess_extension(media_type) or ".jpg"
-    with tempfile.NamedTemporaryFile(suffix=suffix) as src:
-        src.write(photo)
-        src.flush()
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = []
+        for i, (data, media_type) in enumerate(images):
+            path = Path(tmp) / f"input{i}{mimetypes.guess_extension(media_type) or '.jpg'}"
+            path.write_bytes(data)
+            paths.append(str(path))
         try:
-            client = Client(FLUX_SPACE, token=os.environ.get("HF_TOKEN") or None, verbose=False)
-            result, _seed = client.predict(handle_file(src.name), prompt, 0, True, 2.5, 28, api_name="/infer")
+            client = Client(space, token=os.environ.get("HF_TOKEN") or None, verbose=False)
+            if space == QWEN_SPACE:
+                gallery = [{"image": handle_file(p), "caption": None} for p in paths]
+                # rewrite_prompt=False: our prompts already spell out what to keep.
+                result, _seed = client.predict(gallery, prompt, 0, True, 4.0, 30, QWEN_SIZE[1], QWEN_SIZE[0], False,
+                                               api_name="/infer")
+                result = result[0]["image"]
+            else:
+                result, _seed = client.predict(handle_file(paths[0]), prompt, 0, True, 2.5, 28, api_name="/infer")
         except AppError as e:
-            log.warning("FLUX Space refused: %s", e)
-            if "quota" in str(e).lower():
-                raise AnalysisError("今天的 FLUX 免費額度用完了，請明天再試，或改用 Gemini。") from None
-            raise AnalysisError("FLUX 免費 Demo 這次沒有產生圖片，請換一張照片或稍後再試。") from None
+            log.warning("%s refused: %s", space, e)
+            if "quota" in str(e).lower() or "limit" in str(e).lower():
+                raise AnalysisError("今天的免費產圖次數用完了，請明天再試，或改用付費服務。") from None
+            raise AnalysisError("免費產圖服務這次沒有產生圖片，請換一張照片或稍後再試。") from None
         except Exception:
-            log.exception("FLUX Space call failed")
-            raise AnalysisError("FLUX 免費 Demo 暫時連不上，請稍後再試。") from None
+            log.exception("%s call failed", space)
+            raise AnalysisError("免費產圖服務暫時連不上，請稍後再試。") from None
     path = Path(result["path"] if isinstance(result, dict) else result)
     return {"image": path.read_bytes(), "media_type": mimetypes.guess_type(path.name)[0] or "image/webp", "note": ""}
 
@@ -153,8 +171,10 @@ def render(photo: bytes, media_type: str, prompt: str, client=None) -> dict:
     if media_type not in MEDIA_TYPES:
         raise AnalysisError("不支援的圖片格式")
     photo, media_type = frame_for_full_body(photo, media_type)
+    if provider() == "qwen":
+        return _space(QWEN_SPACE, [(photo, media_type)], prompt)
     if provider() == "flux":
-        return _flux(photo, media_type, prompt)
+        return _space(FLUX_SPACE, [(photo, media_type)], prompt)
     return generate_image([prompt, types.Part.from_bytes(data=photo, mime_type=media_type)], ASPECT, client)
 
 
@@ -175,8 +195,9 @@ def dress_avatar(avatar: bytes, avatar_type: str, style: str, garments: list[tup
     description = description.strip()
     if not garments and not description:
         raise AnalysisError("請上傳衣服照片，或描述想穿什麼。")
-    if len(garments) > MAX_GARMENTS:
-        raise AnalysisError(f"一次最多 {MAX_GARMENTS} 件。")
+    limit = dress_limit()
+    if len(garments) > limit:
+        raise AnalysisError(f"一次最多 {limit} 件。")
     if any(mt not in MEDIA_TYPES for _, mt in [(avatar, avatar_type), *garments]):
         raise AnalysisError("不支援的圖片格式")
     prompt = (f"The first image is a character drawn as {STYLES.get(style, STYLES['game'])[1]}. Redraw exactly "
@@ -188,7 +209,10 @@ def dress_avatar(avatar: bytes, avatar_type: str, style: str, garments: list[tup
         prompt += f"\n\nThe other {len(garments)} image(s) are photos of the garments, one item each."
     if description:
         prompt += f"\n\nOutfit: {description}"
-    parts = [prompt, *(types.Part.from_bytes(data=d, mime_type=mt) for d, mt in [(avatar, avatar_type), *garments])]
+    images = [(avatar, avatar_type), *garments]
+    if provider() == "qwen":
+        return _space(QWEN_SPACE, images, prompt)
+    parts = [prompt, *(types.Part.from_bytes(data=d, mime_type=mt) for d, mt in images)]
     return generate_image(parts, ASPECT, client)
 
 
