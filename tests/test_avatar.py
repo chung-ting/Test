@@ -174,6 +174,16 @@ class BackgroundRemovalTests(unittest.TestCase):
         self.assertEqual(Image.open(io.BytesIO(result["image"])).mode, "RGBA")
         self.assertEqual(avatar.remove_background({"image": PHOTO, "media_type": "image/jpeg"})["image"], PHOTO)
 
+    def test_trims_empty_space_around_the_character(self):
+        from PIL import Image
+
+        cut = Image.new("RGBA", (400, 600), (0, 0, 0, 0))
+        cut.paste((10, 20, 30, 255), (150, 100, 250, 500))  # 100 x 400 character
+        trimmed = avatar.trim_to_character(cut)
+        self.assertEqual(trimmed.size, (100 + 2 * 16, 400 + 2 * 16))  # 4% of the longer side on each edge
+        empty = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+        self.assertEqual(avatar.trim_to_character(empty).size, (10, 10))
+
 
 class ProviderTests(unittest.TestCase):
     def test_qwen_when_a_hugging_face_token_is_set_unless_overridden(self):

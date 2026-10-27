@@ -194,9 +194,20 @@ def remove_background(result: dict) -> dict:
     global _rembg_session
     if _rembg_session is None:
         _rembg_session = new_session("isnet-anime")
+    cut = trim_to_character(remove(img, session=_rembg_session, post_process_mask=True))
     out = io.BytesIO()
-    remove(img, session=_rembg_session, post_process_mask=True).save(out, "PNG")
+    cut.save(out, "PNG")
     return {**result, "image": out.getvalue(), "media_type": "image/png"}
+
+
+def trim_to_character(cut, margin: float = 0.04):
+    """Crop a cut-out to the character plus a small margin, so it fills the frame it is shown in."""
+    box = cut.getchannel("A").getbbox()
+    if box is None:
+        return cut
+    pad = int(max(box[2] - box[0], box[3] - box[1]) * margin)
+    return cut.crop((max(box[0] - pad, 0), max(box[1] - pad, 0),
+                     min(box[2] + pad, cut.width), min(box[3] + pad, cut.height)))
 
 
 _rembg_session = None
